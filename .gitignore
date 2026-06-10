@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env.local
+.env*.local
+.DS_Store
+*.log
+
+# raw uncompressed dataset staging (>100MB; we ship public/data/*.gz instead)
+data-gen/papers.slim.jsonl
