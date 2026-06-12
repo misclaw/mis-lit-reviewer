@@ -3,31 +3,13 @@
 import * as engine from "./search.js";
 import * as db from "./store.js";
 import * as ingest from "./ingest.js";
+import { bibtex, cite as copyCite } from "./cite.js";
+import { el, toast, debounce } from "./dom.js";
 
 const COLS = [["journal", "Journals"], ["conference", "Conferences"], ["preprint", "Preprints"]];
 const DEFAULT_FILTERS = { top: 25, journalYears: null, confYears: null, preprintYears: 2 };
 
 const S = { streams: [], current: null, externals: [], pins: [], qvec: null };
-
-const el = (tag, attrs = {}, ...kids) => {
-  const n = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k === "class") n.className = v;
-    else if (k === "html") n.innerHTML = v;
-    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
-    else if (v != null && v !== false) n.setAttribute(k, v);
-  }
-  for (const kid of kids) if (kid != null) n.append(kid.nodeType ? kid : document.createTextNode(kid));
-  return n;
-};
-let toastTimer;
-function toast(msg) {
-  let t = document.getElementById("toast");
-  if (!t) { t = el("div", { id: "toast" }); document.body.append(t); }
-  t.textContent = msg; t.classList.add("show");
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
-}
-const debounce = (fn, ms) => { let h; return (...a) => { clearTimeout(h); h = setTimeout(() => fn(...a), ms); }; };
 const $ = (id) => document.getElementById(id);
 
 function readFilters() {
@@ -279,25 +261,7 @@ async function addExternal() {
   finally { $("add-go").disabled = false; $("add-go").textContent = "Add"; }
 }
 
-function bibtex(r) {
-  const type = { journal: "article", conference: "inproceedings", preprint: "misc" }[r.col] || "misc";
-  const vf = type === "article" ? "journal" : type === "inproceedings" ? "booktitle" : "howpublished";
-  const last = ((r.authors || ["anon"])[0]?.split(" ").pop() || "anon").replace(/[^A-Za-z]/g, "");
-  const key = (last + (r.year || "") + ((r.title || "x").split(" ")[0] || "")).replace(/[^A-Za-z0-9]/g, "").toLowerCase();
-  const doi = r.doi ? r.doi.replace(/^https?:\/\/doi\.org\//, "") : null;
-  const L = [`@${type}{${key},`, `  title = {${r.title || ""}},`];
-  if (r.authors?.length) L.push(`  author = {${r.authors.join(" and ")}},`);
-  if (r.year) L.push(`  year = {${r.year}},`);
-  if (r.venue) L.push(`  ${vf} = {${r.venue}},`);
-  if (doi) L.push(`  doi = {${doi}},`);
-  if (r.url) L.push(`  url = {${r.url}},`);
-  L.push("}");
-  return L.join("\n");
-}
-function cite(r) {
-  const b = bibtex(r);
-  navigator.clipboard.writeText(b).then(() => toast("BibTeX copied"), () => prompt("Copy BibTeX:", b));
-}
+const cite = (r) => copyCite(r, toast);
 function exportBib(e) {
   e.preventDefault();
   if (!S.current) return;

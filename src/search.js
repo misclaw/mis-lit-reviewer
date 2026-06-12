@@ -11,6 +11,7 @@ const COLS = ["journal", "conference", "preprint"];
 
 let extractorP = null;
 let DATA = null;
+let indexP = null;
 
 export function isLoaded() {
   return !!DATA;
@@ -48,7 +49,14 @@ async function fetchChunked(base, name, manifest) {
   return out;
 }
 
-export async function loadIndex(onStep) {
+// Memoized: search and browse views both call this; only the first call
+// actually downloads (concurrent callers share the same promise).
+export function loadIndex(onStep) {
+  if (!indexP) indexP = _loadIndex(onStep);
+  return indexP;
+}
+
+async function _loadIndex(onStep) {
   if (DATA) return DATA;
   const base = import.meta.env.BASE_URL || "./";
   onStep?.("Loading index metadata…");
@@ -151,6 +159,11 @@ export async function search(query, filters = {}) {
     out[c] = buckets[c].slice(0, top).map(([s, r]) => ({ ...papers[r], score: Math.max(0, s) }));
   }
   return out;
+}
+
+// Full corpus array (slim records) for the browse view. Empty until loaded.
+export function allPapers() {
+  return DATA ? DATA.papers : [];
 }
 
 // Look up a corpus paper by id (for placing pinned papers that fell outside top-N).

@@ -114,3 +114,39 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#1d2330;color:#fff;
   padding:9px 16px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:99}
 #toast.show{opacity:1}
+
+/* ---- header tabs + views ---- */
+#nav-tabs{display:flex;gap:4px}
+#nav-tabs .tab{border-color:transparent;background:transparent;color:var(--muted);
+  font-weight:600;padding:6px 14px;border-radius:8px}
+#nav-tabs .tab:hover{background:#eef0f3;color:var(--ink)}
+#nav-tabs .tab.active{background:var(--accent-soft);color:var(--accent)}
+.view{display:none;height:100%}
+.view.active{display:block}
+
+/* ---- browse view ---- */
+.browse{height:100%;display:flex;flex-direction:column}
+.b-top{display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  background:var(--panel);border-bottom:1px solid var(--line);padding:12px 18px}
+.b-status{font-size:13px;color:var(--ink)}
+.b-live{color:#0f9d6b;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.b-subscribe{background:#fbfcfd;border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-width:320px}
+.b-sub-title{font-size:12px;font-weight:700;margin-bottom:6px}
+.b-sub-row{display:flex;gap:7px}
+.b-sub-row input[type=email]{flex:1;min-width:170px}
+.b-subscribe .hint{font-size:11px;color:var(--muted);margin-top:6px}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.b-controls{display:flex;gap:9px;align-items:center;flex-wrap:wrap;padding:10px 18px;
+  background:var(--panel);border-bottom:1px solid var(--line);font-size:12.5px}
+.b-controls input,.b-controls select{padding:6px 8px;font-size:12.5px}
+#b-q{flex:1;min-width:200px}
+.b-controls .yr{width:74px}
+.b-scroll{flex:1;overflow:auto;padding:16px 18px}
+.b-list{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+.b-group{position:sticky;top:-16px;z-index:2;background:var(--bg);font-weight:700;font-size:13px;
+  padding:10px 4px 6px;margin-top:8px}
+.b-group .cnt{color:var(--muted);font-weight:500;font-size:12px}
+.card.fresh{border-color:#bcd3f5;box-shadow:0 0 0 1px #d4e2f9 inset,0 1px 2px rgba(20,30,60,.05)}
+.badge.new{background:var(--accent-soft);color:var(--accent);border:1px solid #c8d8f7}
+.b-foot{max-width:860px;margin:14px auto 30px;text-align:center}
+@media (max-width:760px){.b-top{flex-direction:column;align-items:stretch}.b-subscribe{min-width:0}}

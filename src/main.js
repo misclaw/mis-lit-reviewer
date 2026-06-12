@@ -3,6 +3,7 @@
 // the header offers Export / Import JSON for backup or moving devices.
 import "./style.css";
 import { mountApp } from "./app.js";
+import { mountBrowse } from "./browse.js";
 import { exportStore, importStore } from "./store.js";
 
 const main = document.getElementById("main");
@@ -51,6 +52,41 @@ function mountDataControls() {
   controls.replaceChildren(note, exp, imp, file);
 }
 
+// ---- tabs: Search (semantic search workbench) | Browse (corpus by date) ----
+const views = {};
+let browseMounted = false;
+
+function switchTab(id) {
+  for (const [k, v] of Object.entries(views)) v.classList.toggle("active", k === id);
+  for (const b of document.querySelectorAll("#nav-tabs .tab")) b.classList.toggle("active", b.dataset.tab === id);
+  if (location.hash !== "#" + id) history.replaceState(null, "", "#" + id);
+  if (id === "browse" && !browseMounted) { browseMounted = true; mountBrowse(views.browse); }
+}
+
+function mountTabs() {
+  const nav = document.getElementById("nav-tabs");
+  for (const [id, label] of [["search", "Search"], ["browse", "Browse"]]) {
+    const b = document.createElement("button");
+    b.className = "tab";
+    b.dataset.tab = id;
+    b.textContent = label;
+    b.addEventListener("click", () => switchTab(id));
+    nav.append(b);
+  }
+}
+
 mountDataControls();
 main.replaceChildren();
-mountApp(main);
+for (const id of ["search", "browse"]) {
+  const v = document.createElement("div");
+  v.className = "view";
+  views[id] = v;
+  main.append(v);
+}
+mountTabs();
+mountApp(views.search);
+switchTab(location.hash === "#browse" ? "browse" : "search");
+window.addEventListener("hashchange", () => {
+  const id = location.hash === "#browse" ? "browse" : "search";
+  switchTab(id);
+});
