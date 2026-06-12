@@ -17,7 +17,8 @@ const SORTS = [
   ["cited_desc", "Most cited"],
 ];
 
-const B = { papers: [], groups: [], cursor: { g: 0, i: 0 }, shown: 0, total: 0, ready: false };
+// venueOff = opt-out set: every venue starts selected; unchecking adds it here.
+const B = { papers: [], groups: [], cursor: { g: 0, i: 0 }, shown: 0, total: 0, ready: false, venueOff: new Set(), venues: [] };
 const $ = (id) => document.getElementById(id);
 
 export async function mountBrowse(root) {
@@ -27,7 +28,7 @@ export async function mountBrowse(root) {
       subscribeBox()),
     el("div", { class: "b-controls" },
       el("input", { id: "b-q", placeholder: "Filter by title, author, venue…" }),
-      sel("b-venue", [["", "All venues"]]),
+      venueDropdown(),
       sel("b-col", [["", "All types"], ["journal", "Journals"], ["conference", "Conferences"], ["preprint", "Preprints"]]),
       el("input", { id: "b-y0", class: "yr", type: "number", placeholder: "from" }),
       el("input", { id: "b-y1", class: "yr", type: "number", placeholder: "to" }),
@@ -43,7 +44,7 @@ export async function mountBrowse(root) {
         el("button", { id: "b-more", class: "ghost", hidden: true, onclick: renderMore }, "Show more")))));
 
   $("b-q").addEventListener("input", debounce(apply, 250));
-  for (const id of ["b-venue", "b-col", "b-abs", "b-sort"]) $(id).addEventListener("change", apply);
+  for (const id of ["b-col", "b-abs", "b-sort"]) $(id).addEventListener("change", apply);
   for (const id of ["b-y0", "b-y1"]) $(id).addEventListener("input", debounce(apply, 350));
 
   const base = import.meta.env.BASE_URL || "./";
@@ -66,22 +67,74 @@ export async function mountBrowse(root) {
   B.total = B.papers.length;
   B.ready = true;
 
-  // Venue dropdown: by descending paper count.
+  // Venue list for the multi-select, by descending paper count.
   const counts = new Map();
   for (const p of B.papers) counts.set(p.venue || "Unknown", (counts.get(p.venue || "Unknown") || 0) + 1);
-  const venueSel = $("b-venue");
-  for (const [v, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
-    venueSel.append(el("option", { value: v }, `${v} (${n.toLocaleString()})`));
-  }
+  B.venues = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  renderVenueRows();
   apply();
 }
 
 const sel = (id, opts) => el("select", { id }, ...opts.map(([v, t]) => el("option", { value: v }, t)));
 
 function clearFilters() {
-  $("b-q").value = ""; $("b-venue").value = ""; $("b-col").value = "";
+  $("b-q").value = ""; $("b-col").value = "";
   $("b-y0").value = ""; $("b-y1").value = ""; $("b-abs").value = ""; $("b-sort").value = "added_desc";
+  B.venueOff.clear();
+  renderVenueRows();
   apply();
+}
+
+// ---- venue multi-select (all venues opt-in by default; uncheck to exclude) ----
+
+function venueDropdown() {
+  const panel = el("div", { class: "dd-panel", id: "venue-panel", hidden: true },
+    el("div", { class: "dd-actions" },
+      el("button", { class: "ghost", onclick: () => setAllVenues(true) }, "Select all"),
+      el("button", { class: "ghost", onclick: () => setAllVenues(false) }, "None")),
+    el("div", { class: "dd-rows", id: "venue-rows" }));
+  const btn = el("button", { class: "dd-btn", id: "venue-btn", onclick: (e) => {
+    e.stopPropagation();
+    panel.hidden = !panel.hidden;
+  } }, "Venues: all ▾");
+  const wrap = el("div", { class: "dd" }, btn, panel);
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => { panel.hidden = true; });
+  return wrap;
+}
+
+function setAllVenues(on) {
+  B.venueOff = on ? new Set() : new Set(B.venues.map(([v]) => v));
+  renderVenueRows();
+  apply();
+}
+
+function renderVenueRows() {
+  const rows = $("venue-rows");
+  if (!rows) return;
+  rows.replaceChildren(...B.venues.map(([v, n]) => {
+    const cb = el("input", { type: "checkbox" });
+    cb.checked = !B.venueOff.has(v);
+    cb.addEventListener("change", () => {
+      cb.checked ? B.venueOff.delete(v) : B.venueOff.add(v);
+      updateVenueBtn();
+      apply();
+    });
+    return el("label", { class: "dd-row" }, cb,
+      el("span", { class: "dd-name" }, v),
+      el("span", { class: "dd-n" }, n.toLocaleString()));
+  }));
+  updateVenueBtn();
+}
+
+function updateVenueBtn() {
+  const btn = $("venue-btn");
+  if (!btn) return;
+  const off = B.venueOff.size, total = B.venues.length;
+  btn.textContent = off === 0 ? "Venues: all ▾"
+    : off >= total ? "Venues: none ▾"
+    : `Venues: ${total - off} of ${total} ▾`;
+  btn.classList.toggle("filtering", off > 0);
 }
 
 // ---- status strip + subscribe ----
@@ -150,13 +203,14 @@ function subscribeBox() {
 function apply() {
   if (!B.ready) return;
   const q = $("b-q").value.trim().toLowerCase();
-  const venue = $("b-venue").value, col = $("b-col").value, abs = $("b-abs").value;
+  const col = $("b-col").value, abs = $("b-abs").value;
   const y0 = parseInt($("b-y0").value, 10) || null, y1 = parseInt($("b-y1").value, 10) || null;
   const sort = $("b-sort").value;
+  const off = B.venueOff;
 
   const out = [];
   for (const p of B.papers) {
-    if (venue && (p.venue || "Unknown") !== venue) continue;
+    if (off.size && off.has(p.venue || "Unknown")) continue;
     if (col && p.col !== col) continue;
     if (abs === "1" && !p.abstract) continue;
     if (abs === "0" && p.abstract) continue;
