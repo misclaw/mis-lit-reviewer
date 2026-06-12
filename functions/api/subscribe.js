@@ -24,7 +24,7 @@ export async function onRequestPost({ request, env }) {
 
   if (!existing.ok) {
     const created = await resend(env, "POST", "/contacts", {
-      email, unsubscribed: true, segments: [env.RESEND_SEGMENT_ID],
+      email, unsubscribed: true, segments: [{ id: env.RESEND_SEGMENT_ID }],
     });
     const exists = created.status === 409 || /exist/i.test(created.data?.message || "");
     if (!created.ok && !exists) return json({ error: "Could not register the subscription — try again later." }, 502);
