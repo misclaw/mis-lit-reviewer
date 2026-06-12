@@ -9,6 +9,16 @@ import { exportStore, importStore } from "./store.js";
 const main = document.getElementById("main");
 const controls = document.getElementById("data-controls");
 
+// ---- theme toggle: no data-theme attribute means "follow the system";
+// clicking pins an explicit choice (read before paint in index.html) ----
+document.getElementById("theme-toggle").addEventListener("click", () => {
+  const current = document.documentElement.dataset.theme
+    || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const next = current === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch {}
+});
+
 function mountDataControls() {
   const note = document.createElement("span");
   note.className = "muted";

@@ -4,12 +4,34 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MIS Lit Reviewer — IS corpus</title>
+  <link rel="icon" type="image/png" href="/misclaw.png" />
+  <script>
+    // Apply a saved manual theme before first paint to avoid a flash.
+    try {
+      var t = localStorage.getItem("theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <header id="topnav">
-    <div class="brand">MIS Lit Reviewer <span class="tag">IS corpus</span></div>
+    <div class="nav-left">
+      <a class="mc-home" href="https://misclaw.app" title="misclaw.app — all projects">
+        <img class="mc-logo mc-logo--light" src="/misclaw.png" alt="" width="26" height="26" />
+        <img class="mc-logo mc-logo--dark" src="/misclaw-dark.png" alt="" width="26" height="26" />
+        <span class="mc-home-name">misclaw<span>.app</span></span>
+      </a>
+      <span class="mc-sep" aria-hidden="true">/</span>
+      <div class="brand">MIS Lit Reviewer <span class="tag">IS corpus</span></div>
+    </div>
     <nav id="nav-tabs"></nav>
-    <div id="data-controls"></div>
+    <div class="nav-right">
+      <div id="data-controls"></div>
+      <button id="theme-toggle" class="mc-theme" title="Toggle light / dark mode" aria-label="Toggle light or dark mode">
+        <svg class="mc-icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        <svg class="mc-icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
   </header>
   <main id="main">
     <p class="boot">Loading…</p>
