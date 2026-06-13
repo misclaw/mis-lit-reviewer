@@ -98,10 +98,52 @@ async function _loadIndex(onStep) {
   return DATA;
 }
 
-export async function embedQuery(q) {
+// ---- query-side synonym / acronym expansion (multi-vector MAX) ----
+// No browser-feasible embedding model reliably treats "LLM" and "large language
+// models" as the same thing (measured: 1–4/10 result overlap across
+// bge-small/base/large, mxbai, nomic). So we expand the query into variants
+// (substituting each term with its synonyms IN PLACE, preserving the rest of
+// the query) and score each paper by its BEST-matching variant. Concatenating
+// synonyms into one vector barely helps (centroid shift); MAX over separate
+// variant vectors takes "LLM↔large language models" overlap from 3/10 to 10/10.
+// Cheap, client-side, no re-embed. Groups are tight (true synonyms only) to
+// keep precision; extend by adding mutually-interchangeable sets.
+const SYNONYM_GROUPS = [
+  ["LLM", "LLMs", "large language model", "large language models"],
+  ["GenAI", "gen ai", "generative AI", "generative artificial intelligence"],
+  ["NLP", "natural language processing"],
+  ["RAG", "retrieval-augmented generation", "retrieval augmented generation"],
+];
+const MAX_VARIANTS = 4; // cap parallel query vectors (each adds one full corpus scan)
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Returns { variants, added }: parallel full-query phrasings to MAX over, and
+// the alternate terms introduced (for the UI hint). variants[0] is the original.
+export function queryVariants(q) {
+  const variants = [q];
+  const added = [];
+  for (const group of SYNONYM_GROUPS) {
+    const present = group.find((t) => new RegExp("\\b" + escapeRe(t) + "\\b", "i").test(q));
+    if (!present) continue;
+    const re = new RegExp("\\b" + escapeRe(present) + "\\b", "gi");
+    for (const alt of group) {
+      if (group.some((g) => g.toLowerCase() === alt.toLowerCase() && new RegExp("\\b" + escapeRe(g) + "\\b", "i").test(q))) continue;
+      if (variants.length >= MAX_VARIANTS) break;
+      variants.push(q.replace(re, alt));
+      added.push(alt);
+    }
+  }
+  return { variants: [...new Set(variants)], added: [...new Set(added)] };
+}
+
+async function embedText(text) {
   const ex = await loadModel();
-  const out = await ex((DATA.meta.query_prefix || "") + q, { pooling: "mean", normalize: true });
+  const out = await ex((DATA.meta.query_prefix || "") + text, { pooling: "mean", normalize: true });
   return out.data; // Float32Array, unit length
+}
+
+export async function embedQuery(q) {
+  return embedText(queryVariants(q).variants[0]);
 }
 
 // Embed a DOCUMENT (no query prefix — matches how the corpus was embedded), and
@@ -136,7 +178,10 @@ export function cosineQB64(qvec, b64) {
 //   venueOff = Set of venue names to exclude; cols = Set of enabled columns.
 export async function search(query, filters = {}) {
   if (!DATA) throw new Error("index not loaded");
-  const qv = await embedQuery(query);
+  const { variants, added } = queryVariants(query);
+  const qvecs = [];
+  for (const v of variants) qvecs.push(await embedText(v));
+  const qv = qvecs[0]; // original-query vector; used for pins/externals scoring
   const { dim, count, papers, emb, currentYear } = DATA;
   const top = filters.top || 25;
   const off = filters.venueOff, on = filters.cols;
@@ -152,12 +197,16 @@ export async function search(query, filters = {}) {
     if (off && off.size && off.has(p.venue || "Unknown")) continue;
     const f = floor[p.col];
     if (f && p.year && p.year < f) continue;
-    let s = 0;
     const base = r * dim;
-    for (let i = 0; i < dim; i++) s += qv[i] * emb[base + i];
-    buckets[p.col].push([s / 127, r]);
+    let best = -Infinity;
+    for (const q of qvecs) { // score by the best-matching synonym variant
+      let s = 0;
+      for (let i = 0; i < dim; i++) s += q[i] * emb[base + i];
+      if (s > best) best = s;
+    }
+    buckets[p.col].push([best / 127, r]);
   }
-  const out = { qvec: qv };
+  const out = { qvec: qv, expansion: added };
   for (const c of COLS) {
     buckets[c].sort((a, b) => b[0] - a[0]);
     out[c] = buckets[c].slice(0, top).map(([s, r]) => ({ ...papers[r], score: Math.max(0, s) }));

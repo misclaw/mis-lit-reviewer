@@ -82,6 +82,7 @@ export async function mountApp(root) {
           el("input", { id: "q", placeholder: "Search the corpus in plain language — or leave blank to browse by date  (Enter to search)" }),
           el("button", { class: "primary", id: "go", onclick: runSearch }, "Search"),
           el("button", { class: "ghost", id: "clear-q", hidden: true, onclick: clearQuery }, "Clear")),
+        el("div", { class: "q-expansion muted", id: "q-expansion", hidden: true }),
         el("div", { class: "filters" },
           venueDropdown(),
           columnsDropdown(),
@@ -200,6 +201,7 @@ function sortItems(items, sort) {
   return items;
 }
 function renderBrowse() {
+  const exp = $("q-expansion"); if (exp) exp.hidden = true;
   if (!S.byCol.journal.length && !S.byCol.conference.length && !S.byCol.preprint.length) return;
   const off = S.venueOff, floors = yearFloors();
   const parts = [];
@@ -401,6 +403,9 @@ async function runSearch() {
   try {
     const res = await engine.search(q, { ...readFilters(), venueOff: S.venueOff, cols: S.colsOn });
     S.qvec = res.qvec;
+    const exp = $("q-expansion");
+    if (res.expansion?.length) { exp.textContent = "＋ also matching: " + res.expansion.join(" · "); exp.hidden = false; }
+    else exp.hidden = true;
     const cols = { journal: [...res.journal], conference: [...res.conference], preprint: [...res.preprint] };
     if (S.current) mergeStream(cols);
     const parts = [];
