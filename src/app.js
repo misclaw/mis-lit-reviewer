@@ -27,6 +27,30 @@ const SORTS = [
 const PAGE_COL = 40;                       // browse: papers rendered per column per page
 const PREFS_KEY = "mis-lit-reviewer:view"; // global view prefs (columns shown + sort)
 
+// Familiar short labels for IS venues: the full OpenAlex / AIS eLibrary names
+// mapped to what MIS scholars actually call them. Conferences (ICIS, AMCIS,
+// ECIS, PACIS) and preprint servers (SSRN, arXiv) are already short, so they
+// fall through venueLabel() unchanged.
+const VENUE_ABBR = {
+  "Journal of the Association for Information Systems": "JAIS",
+  "MIS Quarterly": "MISQ",
+  "Information Systems Research": "ISR",
+  "Journal of Management Information Systems": "JMIS",
+  "European Journal of Information Systems": "EJIS",
+  "Journal of Information Technology": "JIT",
+  "Information Systems Journal": "ISJ",
+  "Journal of Strategic Information Systems": "JSIS",
+  "Management Science": "Mgmt Sci",
+  "Organization Science": "Org Sci",
+  "Marketing Science": "Mktg Sci",
+  "Production and Operations Management": "POM",
+  "Manufacturing & Service Operations Management": "M&SOM",
+};
+const venueLabel = (v) => VENUE_ABBR[v] || v;
+
+// "panel-left" glyph for the sidebar collapse/expand toggle.
+const PANEL_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>';
+
 const S = {
   streams: [], current: null, externals: [], pins: [], qvec: null,
   // corpus / browse state
@@ -34,6 +58,7 @@ const S = {
   venues: [], venueOff: new Set(), status: null,
   colsOn: new Set(["journal", "conference", "preprint"]),
   sort: "added_desc",
+  sidebarCollapsed: false,
   browse: { journal: { items: [], shown: 0 }, conference: { items: [], shown: 0 }, preprint: { items: [], shown: 0 } },
   lastResults: null, // live search columns, kept so "Save" can snapshot them
   view: "workbench", // "workbench" (browse/query/snapshot) | "pinned" (cross-query library)
@@ -48,10 +73,26 @@ function loadPrefs() {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
     if (Array.isArray(p.cols) && p.cols.length) S.colsOn = new Set(p.cols.filter((c) => COLS.some(([k]) => k === c)));
     if (SORTS.some(([v]) => v === p.sort)) S.sort = p.sort;
+    if (typeof p.sidebarCollapsed === "boolean") S.sidebarCollapsed = p.sidebarCollapsed;
   } catch {}
 }
 function savePrefs() {
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ cols: [...S.colsOn], sort: S.sort })); } catch {}
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ cols: [...S.colsOn], sort: S.sort, sidebarCollapsed: S.sidebarCollapsed })); } catch {}
+}
+
+// ---- sidebar fold / unfold (collapses the query-stream rail to widen the board) ----
+function toggleSidebar() {
+  S.sidebarCollapsed = !S.sidebarCollapsed;
+  applySidebar();
+  savePrefs();
+}
+function applySidebar() {
+  document.querySelector(".shell")?.classList.toggle("sidebar-collapsed", S.sidebarCollapsed);
+  const btn = $("sidebar-toggle");
+  if (btn) {
+    btn.title = S.sidebarCollapsed ? "Show sidebar" : "Hide sidebar";
+    btn.setAttribute("aria-expanded", String(!S.sidebarCollapsed));
+  }
 }
 
 function readFilters() {
@@ -76,6 +117,7 @@ export async function mountApp(root) {
     el("section", { class: "workspace" },
       el("div", { class: "topbar" },
         el("div", { class: "title-row" },
+          el("button", { class: "ghost icon-btn", id: "sidebar-toggle", title: "Hide sidebar", "aria-label": "Toggle sidebar", onclick: toggleSidebar, html: PANEL_ICON }),
           el("input", { id: "stream-name", placeholder: "Scratch search", disabled: true, onchange: renameCurrent }),
           el("span", { class: "scratch-badge", id: "scratch-badge", hidden: true }, "scratch · not saved"),
           el("span", { class: "spacer" }),
@@ -90,7 +132,6 @@ export async function mountApp(root) {
           el("button", { class: "ghost", id: "clear-q", hidden: true, onclick: clearQuery }, "Clear")),
         el("div", { class: "q-expansion muted", id: "q-expansion", hidden: true }),
         el("div", { class: "filters" },
-          venueDropdown(),
           columnsDropdown(),
           sel("f-sort", "Sort", SORTS, S.sort),
           el("span", { class: "fsep" }),
@@ -101,6 +142,7 @@ export async function mountApp(root) {
           el("span", { class: "spacer" }),
           el("span", { id: "status", class: "muted" }),
           el("span", { id: "counts", class: "muted" })),
+        venueChips(),
         addPanel(), notesPanel()),
       el("div", { id: "cols", class: "columns" },
         ...COLS.map(([k, label]) =>
@@ -129,6 +171,7 @@ export async function mountApp(root) {
   $("notes").addEventListener("input", debounce(async () => { if (S.current) await db.updateStream(S.current.id, { notes: $("notes").value }); }, 700));
 
   syncColumnsUI();
+  applySidebar();
 
   const overlay = el("div", { class: "overlay" }, el("div", { class: "spinner" }), el("p", { id: "load-step" }, "Loading…"));
   root.append(overlay);
@@ -171,7 +214,7 @@ function buildCorpus(recent) {
   }
   S.byCol = byCol;
   S.venues = [...venueCount.entries()].sort((a, b) => b[1] - a[1]);
-  renderVenueRows();
+  renderVenueChips();
 }
 
 // ---- top-level render: pick browse vs query mode from the query box ----
@@ -247,39 +290,43 @@ function renderColMore(k) {
   if (remaining > 0) more.textContent = `Show more (${remaining.toLocaleString()})`;
 }
 
-// ---- venue multi-select (every venue checked by default; uncheck to exclude) ----
-function venueDropdown() {
-  const panel = el("div", { class: "dd-panel", id: "venue-panel", hidden: true },
-    el("div", { class: "dd-actions" },
-      el("button", { class: "ghost", onclick: () => setAllVenues(true) }, "Select all"),
-      el("button", { class: "ghost", onclick: () => setAllVenues(false) }, "None")),
-    el("div", { class: "dd-rows", id: "venue-rows" }));
-  const btn = el("button", { class: "dd-btn", id: "venue-btn", onclick: (e) => { e.stopPropagation(); closeDropdowns(panel); panel.hidden = !panel.hidden; } }, "Venues: all ▾");
-  panel.addEventListener("click", (e) => e.stopPropagation());
-  return el("div", { class: "dd" }, btn, panel);
+// ---- venue choice chips (every venue selected by default; click to exclude) ----
+// A selected chip = included (accent fill); a deselected chip = excluded (muted
+// outline). venueOff stays the single source of truth, so browse/search are
+// untouched — only the control surface changed from a dropdown to chips.
+function venueChips() {
+  return el("div", { class: "venue-bar", id: "venue-bar", hidden: true },
+    el("span", { class: "venue-bar-label" }, "Venues"),
+    el("div", { class: "chips", id: "venue-chips" }),
+    el("button", { class: "ghost chip-action", id: "venue-toggle-all", type: "button", onclick: toggleAllVenues }, "Clear all"));
+}
+function toggleVenue(v) {
+  S.venueOff.has(v) ? S.venueOff.delete(v) : S.venueOff.add(v);
+  renderVenueChips();
+  render();
 }
 function setAllVenues(on) {
   S.venueOff = on ? new Set() : new Set(S.venues.map(([v]) => v));
-  renderVenueRows();
+  renderVenueChips();
   render();
 }
-function renderVenueRows() {
-  const rows = $("venue-rows");
-  if (!rows) return;
-  rows.replaceChildren(...S.venues.map(([v, n]) => {
-    const cb = el("input", { type: "checkbox" });
-    cb.checked = !S.venueOff.has(v);
-    cb.addEventListener("change", () => { cb.checked ? S.venueOff.delete(v) : S.venueOff.add(v); updateVenueBtn(); render(); });
-    return el("label", { class: "dd-row" }, cb, el("span", { class: "dd-name" }, v), el("span", { class: "dd-n" }, n.toLocaleString()));
+// All selected → clear them; anything excluded → restore the full set.
+function toggleAllVenues() { setAllVenues(S.venueOff.size > 0); }
+function renderVenueChips() {
+  const box = $("venue-chips");
+  if (!box) return;
+  $("venue-bar").hidden = !S.venues.length;
+  box.replaceChildren(...S.venues.map(([v, n]) => {
+    const on = !S.venueOff.has(v);
+    return el("button", {
+      class: "chip" + (on ? " on" : ""), type: "button",
+      title: `${v} · ${n.toLocaleString()} paper${n === 1 ? "" : "s"}`,
+      "aria-pressed": String(on),
+      onclick: () => toggleVenue(v),
+    }, venueLabel(v));
   }));
-  updateVenueBtn();
-}
-function updateVenueBtn() {
-  const btn = $("venue-btn");
-  if (!btn) return;
-  const off = S.venueOff.size, total = S.venues.length;
-  btn.textContent = off === 0 ? "Venues: all ▾" : off >= total ? "Venues: none ▾" : `Venues: ${total - off} of ${total} ▾`;
-  btn.classList.toggle("filtering", off > 0);
+  const btn = $("venue-toggle-all");
+  if (btn) btn.textContent = S.venueOff.size === 0 ? "Clear all" : "Select all";
 }
 
 // ---- column add / remove / revive ----
