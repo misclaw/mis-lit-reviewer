@@ -1,5 +1,15 @@
-// Main app: sidebar of query streams + three-column semantic search, with
-// streams / pins / added papers / notes persisted locally (localStorage).
+// Unified workbench: one view that is a date-sorted corpus browser by default
+// and a three-column semantic search the moment you type a natural-language
+// query. The left sidebar of query streams + pins / notes / added papers /
+// .bib export all persist locally (localStorage).
+//
+// Two modes share the same three columns (Journals / Conferences / Preprints):
+//   • browse  — query box empty: each column is its slice of the corpus,
+//                venue-filtered, sorted (recently added by default), paged.
+//   • query   — query box filled: each column is its top-N semantic matches,
+//                with pins / added papers merged in.
+// Columns can be hidden and revived freely (the layout collapses to 2- or
+// 1-column); the choice persists.
 import * as engine from "./search.js";
 import * as db from "./store.js";
 import * as ingest from "./ingest.js";
@@ -8,9 +18,39 @@ import { el, toast, debounce } from "./dom.js";
 
 const COLS = [["journal", "Journals"], ["conference", "Conferences"], ["preprint", "Preprints"]];
 const DEFAULT_FILTERS = { top: 25, journalYears: null, confYears: null, preprintYears: 2 };
+const SORTS = [
+  ["added_desc", "Recently added"],
+  ["year_desc", "Newest published"],
+  ["year_asc", "Oldest published"],
+  ["cited_desc", "Most cited"],
+];
+const PAGE_COL = 40;                       // browse: papers rendered per column per page
+const PREFS_KEY = "mis-lit-reviewer:view"; // global view prefs (columns shown + sort)
 
-const S = { streams: [], current: null, externals: [], pins: [], qvec: null };
+const S = {
+  streams: [], current: null, externals: [], pins: [], qvec: null,
+  // corpus / browse state
+  byCol: { journal: [], conference: [], preprint: [] }, // corpus + fresh, per type
+  venues: [], venueOff: new Set(), status: null,
+  colsOn: new Set(["journal", "conference", "preprint"]),
+  sort: "added_desc",
+  browse: { journal: { items: [], shown: 0 }, conference: { items: [], shown: 0 }, preprint: { items: [], shown: 0 } },
+  mode: "browse",
+};
 const $ = (id) => document.getElementById(id);
+
+// ---- view prefs (columns shown + sort) persist; venue selection resets to
+// "all" each load so the default is always every venue checked. ----
+function loadPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
+    if (Array.isArray(p.cols) && p.cols.length) S.colsOn = new Set(p.cols.filter((c) => COLS.some(([k]) => k === c)));
+    if (SORTS.some(([v]) => v === p.sort)) S.sort = p.sort;
+  } catch {}
+}
+function savePrefs() {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ cols: [...S.colsOn], sort: S.sort })); } catch {}
+}
 
 function readFilters() {
   const num = (id) => { const v = $(id).value; return v === "" ? null : parseInt(v, 10); };
@@ -24,6 +64,7 @@ function applyFilters(f = {}) {
 }
 
 export async function mountApp(root) {
+  loadPrefs();
   root.replaceChildren(el("div", { class: "shell" },
     el("aside", { id: "sidebar" },
       el("div", { class: "side-actions" }, el("button", { class: "primary", id: "new-stream", onclick: newStream }, "+ New query stream")),
@@ -38,33 +79,64 @@ export async function mountApp(root) {
           el("button", { class: "ghost", id: "t-notes", onclick: () => $("notes-panel").classList.toggle("open") }, "Notes"),
           el("a", { class: "ghost", id: "export-bib", href: "#", hidden: true, onclick: exportBib }, "Export .bib")),
         el("div", { class: "searchbar" },
-          el("input", { id: "q", placeholder: "Describe what you're looking for, in plain language…  (Enter to search)" }),
-          el("button", { class: "primary", id: "go", onclick: runSearch }, "Search")),
+          el("input", { id: "q", placeholder: "Search the corpus in plain language — or leave blank to browse by date  (Enter to search)" }),
+          el("button", { class: "primary", id: "go", onclick: runSearch }, "Search"),
+          el("button", { class: "ghost", id: "clear-q", hidden: true, onclick: clearQuery }, "Clear")),
         el("div", { class: "filters" },
+          venueDropdown(),
+          columnsDropdown(),
+          sel("f-sort", "Sort", SORTS, S.sort),
+          el("span", { class: "fsep" }),
           sel("f-top", "Results/col", [["10", "10"], ["25", "25"], ["50", "50"]], "25"),
-          sel("f-journal", "Journals", [["", "all years"], ["5", "last 5y"], ["10", "last 10y"]], ""),
-          sel("f-conf", "Conferences", [["", "all years"], ["5", "last 5y"], ["10", "last 10y"]], ""),
-          sel("f-pre", "Preprints", [["1", "last 1y"], ["2", "last 2y"], ["3", "last 3y"], ["5", "last 5y"], ["", "all years"]], "2"),
-          el("span", { class: "spacer" }), el("span", { id: "counts", class: "muted" })),
+          sel("f-journal", "Yr · journals", [["", "all"], ["5", "5y"], ["10", "10y"]], ""),
+          sel("f-conf", "conf.", [["", "all"], ["5", "5y"], ["10", "10y"]], ""),
+          sel("f-pre", "preprints", [["1", "1y"], ["2", "2y"], ["3", "3y"], ["5", "5y"], ["", "all"]], "2"),
+          el("span", { class: "spacer" }),
+          el("span", { id: "status", class: "muted" }),
+          el("span", { id: "counts", class: "muted" })),
         addPanel(), notesPanel()),
       el("div", { id: "cols", class: "columns" }, ...COLS.map(([k, label]) =>
-        el("div", { class: "col col-" + k },
-          el("div", { class: "col-head" }, el("span", { class: "dot" }), label, el("span", { class: "cnt", id: "cnt-" + k })),
-          el("div", { class: "col-list", id: "list-" + k })))))));
+        el("div", { class: "col col-" + k, id: "col-" + k },
+          el("div", { class: "col-head" },
+            el("span", { class: "dot" }),
+            el("span", { class: "col-label" }, label),
+            el("span", { class: "cnt", id: "cnt-" + k }),
+            el("span", { class: "spacer" }),
+            el("button", { class: "col-x ghost", title: "Hide this column", onclick: () => toggleCol(k, false) }, "✕")),
+          el("div", { class: "col-list", id: "list-" + k }),
+          el("div", { class: "col-foot" },
+            el("button", { class: "ghost col-more", id: "more-" + k, hidden: true, onclick: () => renderColMore(k) }, "Show more"))))),
+      el("div", { id: "cols-empty", class: "col-note", hidden: true }, "All columns hidden — bring one back from “Columns ▾”."))));
 
   $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
-  $("q").addEventListener("input", () => { if (!S.current) $("scratch-badge").hidden = !$("q").value; });
-  for (const id of ["f-top", "f-journal", "f-conf", "f-pre"]) $(id).addEventListener("change", () => { if ($("q").value.trim()) runSearch(); });
+  $("q").addEventListener("input", () => {
+    $("clear-q").hidden = !$("q").value;
+    if (!S.current) $("scratch-badge").hidden = !$("q").value;
+    if (!$("q").value.trim() && S.mode === "query") render(); // emptied → fall back to browse
+  });
+  $("f-sort").addEventListener("change", () => { S.sort = $("f-sort").value; savePrefs(); render(); });
+  for (const id of ["f-top", "f-journal", "f-conf", "f-pre"]) $(id).addEventListener("change", render);
   $("notes").addEventListener("input", debounce(async () => { if (S.current) await db.updateStream(S.current.id, { notes: $("notes").value }); }, 700));
+
+  syncColumnsUI();
 
   const overlay = el("div", { class: "overlay" }, el("div", { class: "spinner" }), el("p", { id: "load-step" }, "Loading…"));
   root.append(overlay);
+  const base = import.meta.env.BASE_URL || "./";
+  const fetchJson = (name) => fetch(base + "data/" + name).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   try {
-    await engine.loadIndex((s) => { const p = $("load-step"); if (p) p.textContent = s; });
+    const [, status, recent] = await Promise.all([
+      engine.loadIndex((s) => { const p = $("load-step"); if (p) p.textContent = s; }),
+      fetchJson("status.json"),
+      fetchJson("recent.json"),
+    ]);
     overlay.remove();
-    const st = engine.corpusStats();
-    placeholderNote(`Ready — ${st.total.toLocaleString()} papers (${st.journal.toLocaleString()} journal · ${st.conference.toLocaleString()} conference · ${st.preprint} preprint). First query also downloads the ~30 MB model (cached after).`);
-  } catch (e) { overlay.querySelector("p").textContent = "Failed to load index: " + e.message; return; }
+    buildCorpus(recent);
+    S.status = status;
+    renderStatus();
+  } catch (e) { overlay.querySelector("p").textContent = "Failed to load corpus: " + e.message; return; }
+
+  render(); // browse by default (no query yet)
 
   try { S.streams = await db.listStreams(); } catch (e) { toast("Streams unavailable: " + e.message); }
   renderSidebar();
@@ -72,6 +144,171 @@ export async function mountApp(root) {
 
 const sel = (id, label, opts, s) => el("label", {}, label + " ",
   el("select", { id }, ...opts.map(([v, t]) => el("option", v === s ? { value: v, selected: true } : { value: v }, t))));
+
+// ---- corpus assembly: shipped corpus + recent.json overlay, split by type ----
+function buildCorpus(recent) {
+  const corpus = engine.allPapers();
+  const seen = new Set(corpus.map((p) => p.id));
+  const fresh = (recent?.papers || []).filter((p) => !seen.has(p.id)).map((p) => ({ ...p, fresh: true }));
+  const all = fresh.concat(corpus);
+  const byCol = { journal: [], conference: [], preprint: [] };
+  const venueCount = new Map();
+  for (const p of all) {
+    (byCol[p.col] || byCol.journal).push(p);
+    const v = p.venue || "Unknown";
+    venueCount.set(v, (venueCount.get(v) || 0) + 1);
+  }
+  S.byCol = byCol;
+  S.venues = [...venueCount.entries()].sort((a, b) => b[1] - a[1]);
+  renderVenueRows();
+}
+
+// ---- top-level render: pick browse vs query mode from the query box ----
+function render() {
+  const q = $("q").value.trim();
+  S.mode = q && engine.isLoaded() ? "query" : "browse";
+  $("clear-q").hidden = !$("q").value;
+  $("f-sort").disabled = S.mode === "query"; // ranking is by relevance while searching
+  if (S.mode === "query") runSearch();
+  else renderBrowse();
+}
+
+function clearQuery() {
+  $("q").value = ""; $("clear-q").hidden = true;
+  if (!S.current) $("scratch-badge").hidden = true;
+  render();
+}
+
+// ---- browse mode: corpus by column, filtered + sorted + paged ----
+function yearFloors() {
+  const cy = engine.corpusStats()?.currentYear || new Date().getFullYear();
+  const f = readFilters();
+  return {
+    journal: f.journalYears ? cy - f.journalYears + 1 : null,
+    conference: f.confYears ? cy - f.confYears + 1 : null,
+    preprint: f.preprintYears ? cy - f.preprintYears + 1 : null,
+  };
+}
+function sortItems(items, sort) {
+  const byYearDesc = (a, b) => (b.year || 0) - (a.year || 0) || (a.title || "").localeCompare(b.title || "");
+  if (sort === "added_desc") items.sort((a, b) => (b.added || "").localeCompare(a.added || "") || byYearDesc(a, b));
+  else if (sort === "year_desc") items.sort(byYearDesc);
+  else if (sort === "year_asc") items.sort((a, b) => (a.year || 9999) - (b.year || 9999) || (a.title || "").localeCompare(b.title || ""));
+  else if (sort === "cited_desc") items.sort((a, b) => (b.cited || 0) - (a.cited || 0) || byYearDesc(a, b));
+  return items;
+}
+function renderBrowse() {
+  if (!S.byCol.journal.length && !S.byCol.conference.length && !S.byCol.preprint.length) return;
+  const off = S.venueOff, floors = yearFloors();
+  const parts = [];
+  for (const [k] of COLS) {
+    if (!S.colsOn.has(k)) continue;
+    const floor = floors[k];
+    const items = sortItems(S.byCol[k].filter((p) =>
+      !(off.size && off.has(p.venue || "Unknown")) && !(floor && (!p.year || p.year < floor))
+    ), S.sort);
+    S.browse[k] = { items, shown: 0 };
+    $("cnt-" + k).textContent = items.length.toLocaleString();
+    $("list-" + k).replaceChildren();
+    renderColMore(k);
+    parts.push(items.length);
+  }
+  $("counts").textContent = parts.length ? parts.join(" / ") : "";
+}
+function renderColMore(k) {
+  if (S.mode !== "browse") return;
+  const st = S.browse[k], list = $("list-" + k);
+  if (st.shown === 0 && !st.items.length) list.append(el("div", { class: "col-empty" }, "no papers"));
+  const end = Math.min(st.shown + PAGE_COL, st.items.length);
+  for (let i = st.shown; i < end; i++) list.append(card(st.items[i], k));
+  st.shown = end;
+  const more = $("more-" + k), remaining = st.items.length - st.shown;
+  more.hidden = remaining <= 0;
+  if (remaining > 0) more.textContent = `Show more (${remaining.toLocaleString()})`;
+}
+
+// ---- venue multi-select (every venue checked by default; uncheck to exclude) ----
+function venueDropdown() {
+  const panel = el("div", { class: "dd-panel", id: "venue-panel", hidden: true },
+    el("div", { class: "dd-actions" },
+      el("button", { class: "ghost", onclick: () => setAllVenues(true) }, "Select all"),
+      el("button", { class: "ghost", onclick: () => setAllVenues(false) }, "None")),
+    el("div", { class: "dd-rows", id: "venue-rows" }));
+  const btn = el("button", { class: "dd-btn", id: "venue-btn", onclick: (e) => { e.stopPropagation(); closeDropdowns(panel); panel.hidden = !panel.hidden; } }, "Venues: all ▾");
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  return el("div", { class: "dd" }, btn, panel);
+}
+function setAllVenues(on) {
+  S.venueOff = on ? new Set() : new Set(S.venues.map(([v]) => v));
+  renderVenueRows();
+  render();
+}
+function renderVenueRows() {
+  const rows = $("venue-rows");
+  if (!rows) return;
+  rows.replaceChildren(...S.venues.map(([v, n]) => {
+    const cb = el("input", { type: "checkbox" });
+    cb.checked = !S.venueOff.has(v);
+    cb.addEventListener("change", () => { cb.checked ? S.venueOff.delete(v) : S.venueOff.add(v); updateVenueBtn(); render(); });
+    return el("label", { class: "dd-row" }, cb, el("span", { class: "dd-name" }, v), el("span", { class: "dd-n" }, n.toLocaleString()));
+  }));
+  updateVenueBtn();
+}
+function updateVenueBtn() {
+  const btn = $("venue-btn");
+  if (!btn) return;
+  const off = S.venueOff.size, total = S.venues.length;
+  btn.textContent = off === 0 ? "Venues: all ▾" : off >= total ? "Venues: none ▾" : `Venues: ${total - off} of ${total} ▾`;
+  btn.classList.toggle("filtering", off > 0);
+}
+
+// ---- column add / remove / revive ----
+function columnsDropdown() {
+  const panel = el("div", { class: "dd-panel narrow", id: "cols-panel", hidden: true },
+    el("div", { class: "dd-rows", id: "cols-rows" },
+      ...COLS.map(([k, label]) => {
+        const cb = el("input", { type: "checkbox", id: "colcb-" + k });
+        cb.addEventListener("change", () => toggleCol(k, cb.checked));
+        return el("label", { class: "dd-row" }, cb, el("span", { class: "dd-name" }, label));
+      })));
+  const btn = el("button", { class: "dd-btn", id: "cols-btn", onclick: (e) => { e.stopPropagation(); closeDropdowns(panel); panel.hidden = !panel.hidden; } }, "Columns ▾");
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  return el("div", { class: "dd" }, btn, panel);
+}
+function toggleCol(k, on) {
+  if (on) S.colsOn.add(k); else S.colsOn.delete(k);
+  savePrefs();
+  syncColumnsUI();
+  render();
+}
+function syncColumnsUI() {
+  const on = COLS.filter(([k]) => S.colsOn.has(k));
+  $("cols").style.gridTemplateColumns = on.length ? `repeat(${on.length},minmax(0,1fr))` : "1fr";
+  for (const [k] of COLS) {
+    $("col-" + k).hidden = !S.colsOn.has(k);
+    const cb = $("colcb-" + k); if (cb) cb.checked = S.colsOn.has(k);
+  }
+  $("cols-empty").hidden = on.length > 0;
+  const btn = $("cols-btn");
+  if (btn) { btn.textContent = on.length === COLS.length ? "Columns ▾" : `Columns: ${on.length} ▾`; btn.classList.toggle("filtering", on.length < COLS.length); }
+}
+function closeDropdowns(except) {
+  for (const p of document.querySelectorAll(".dd-panel")) if (p !== except) p.hidden = true;
+}
+document.addEventListener("click", () => closeDropdowns());
+
+// ---- status line (from data/status.json) ----
+function renderStatus() {
+  const box = $("status");
+  if (!box) return;
+  const st = S.status;
+  if (!st) { box.textContent = "updated daily from OpenAlex + AIS eLibrary"; return; }
+  const run = st.last_run || {};
+  const bits = [el("span", { class: "live" }, "● updated daily")];
+  if (run.date) bits.push(document.createTextNode(` · ${run.date}: ${(run.new_papers ?? 0).toLocaleString()} new`));
+  if (st.totals?.searchable) bits.push(document.createTextNode(` · ${st.totals.searchable.toLocaleString()} searchable`));
+  box.replaceChildren(...bits);
+}
 
 function addPanel() {
   return el("div", { class: "panel", id: "add-panel" },
@@ -113,13 +350,13 @@ async function selectStream(id) {
   $("scratch-badge").hidden = true; $("notes").value = s.notes || "";
   $("export-bib").hidden = false; applyFilters(s.filters); $("q").value = s.query || "";
   renderSidebar();
-  if (s.query) runSearch(); else clearColumns();
+  render();
 }
 async function deleteStream(s) {
   if (!confirm(`Delete stream “${s.name}”? Its pins, notes and added papers are removed.`)) return;
   await db.deleteStream(s.id);
   S.streams = S.streams.filter((x) => x.id !== s.id);
-  if (S.current?.id === s.id) { S.current = null; S.externals = []; S.pins = []; resetScratch(); }
+  if (S.current?.id === s.id) { S.current = null; S.externals = []; S.pins = []; resetScratch(); render(); }
   renderSidebar();
 }
 async function renameCurrent() {
@@ -142,34 +379,37 @@ async function ensureStream() {
 
 const saveMeta = debounce(async () => { if (S.current) await db.updateStream(S.current.id, { query: $("q").value, filters: readFilters() }); }, 600);
 
-// ---- search ----
-function clearColumns() { for (const [k] of COLS) $("list-" + k).replaceChildren(); $("counts").textContent = ""; }
-function placeholderNote(msg) { $("list-journal").replaceChildren(el("div", { class: "col-note" }, msg)); }
-
+// ---- query mode: three-column semantic search ----
 async function runSearch() {
   const q = $("q").value.trim();
-  if (!q) return toast("Type something to search");
-  if (!engine.isLoaded()) return toast("Index still loading…");
-  for (const [k] of COLS) $("list-" + k).replaceChildren(el("div", { class: "loading" }, k === "journal" ? "searching…" : ""));
+  if (!q) return render(); // empty → browse
+  if (!engine.isLoaded()) return toast("Corpus still loading…");
+  S.mode = "query";
+  $("f-sort").disabled = true;
+  for (const [k] of COLS) { if (S.colsOn.has(k)) { $("more-" + k).hidden = true; $("list-" + k).replaceChildren(el("div", { class: "loading" }, k === "journal" ? "searching…" : "")); } }
   $("scratch-badge").hidden = !!S.current;
   try {
-    const res = await engine.search(q, readFilters());
+    const res = await engine.search(q, { ...readFilters(), venueOff: S.venueOff, cols: S.colsOn });
     S.qvec = res.qvec;
     const cols = { journal: [...res.journal], conference: [...res.conference], preprint: [...res.preprint] };
     if (S.current) mergeStream(cols);
+    const parts = [];
     for (const [k] of COLS) {
+      if (!S.colsOn.has(k)) continue;
       $("cnt-" + k).textContent = cols[k].length;
       const list = $("list-" + k); list.replaceChildren();
-      if (!cols[k].length) { list.append(el("div", { class: "col-empty" }, "no matches")); continue; }
-      for (const r of cols[k]) list.append(card(r, k));
+      if (!cols[k].length) { list.append(el("div", { class: "col-empty" }, "no matches")); }
+      else for (const r of cols[k]) list.append(card(r, k));
+      parts.push(cols[k].length);
     }
-    $("counts").textContent = `${cols.journal.length} / ${cols.conference.length} / ${cols.preprint.length}`;
+    $("counts").textContent = parts.join(" / ");
     if (S.current) saveMeta();
   } catch (e) { toast("Search failed: " + e.message); console.error(e); }
 }
 
 function mergeStream(cols) {
   for (const ext of S.externals) {
+    if (S.venueOff.size && S.venueOff.has(ext.venue || "Unknown")) continue;
     const col = cols[ext.col] || cols.journal;
     const score = ext.emb ? engine.cosineQB64(S.qvec, ext.emb) : null;
     col.unshift({ ...ext, score, external: true, pinned: ext.emb == null });
@@ -185,20 +425,23 @@ function mergeStream(cols) {
   for (const k of Object.keys(cols)) cols[k].sort((a, b) => (a.pinned ? 0 : 1) - (b.pinned ? 0 : 1) || (b.score || 0) - (a.score || 0));
 }
 
-// ---- card ----
+// ---- card (shared by browse + query) ----
 function card(r, col) {
-  const authors = (r.authors || []).slice(0, 4).join(", ") + ((r.authors || []).length > 4 ? " et al." : "");
+  const authors = (r.authors || []).slice(0, 5).join(", ") + ((r.authors || []).length > 5 ? " et al." : "");
   const meta = el("div", { class: "meta" });
   if (r.score != null) meta.append(el("span", { class: "score" }, r.score.toFixed(3)));
+  if (r.fresh) meta.append(el("span", { class: "badge new", title: "Crawled after the last search-index build — browsable now, searchable after the next refresh" }, "new"));
   if (r.pinned && !r.external) meta.append(el("span", { class: "badge pin" }, "pinned"));
   if (r.external) meta.append(el("span", { class: "badge ext" }, "added"));
   if (!r.abstract) meta.append(el("span", { class: "badge noabs" }, "no abstract"));
   meta.append(document.createTextNode([authors, r.year, r.venue].filter(Boolean).join(" · ")));
+  if (r.cited > 0) meta.append(el("span", { class: "muted" }, ` · ${r.cited.toLocaleString()} cite${r.cited === 1 ? "" : "s"}`));
+  if (r.added && S.mode === "browse") meta.append(el("span", { class: "muted" }, ` · added ${r.added}`));
 
   const link = r.url || (r.doi ? "https://doi.org/" + r.doi.replace(/^https?:\/\/doi\.org\//, "") : null);
   const ttl = link ? el("a", { href: link, target: "_blank", rel: "noopener" }, r.title || "(untitled)") : document.createTextNode(r.title || "(untitled)");
   const abs = el("div", { class: "abs" }, r.abstract || "— no abstract on record —");
-  const cls = "card" + (r.external ? " external" : "") + (r.pinned ? " pinned" : "");
+  const cls = "card" + (r.external ? " external" : "") + (r.pinned ? " pinned" : "") + (r.fresh ? " fresh" : "");
   const c = el("div", { class: cls }, el("div", { class: "ttl" }, ttl), meta, abs);
   requestAnimationFrame(() => {
     if (abs.scrollHeight > abs.clientHeight + 4) {
@@ -208,7 +451,7 @@ function card(r, col) {
     }
   });
   const acts = el("div", { class: "acts" });
-  if (!r.external) acts.append(el("button", { class: "ghost", onclick: () => togglePin(r, col) }, r.pinned ? "★ unpin" : "☆ pin"));
+  if (!r.external && !r.fresh) acts.append(el("button", { class: "ghost", onclick: () => togglePin(r, col) }, r.pinned ? "★ unpin" : "☆ pin"));
   acts.append(el("button", { class: "ghost", onclick: () => cite(r) }, "❝ cite"));
   acts.append(el("span", { class: "spacer" }));
   if (r.external) acts.append(el("button", { class: "ghost", onclick: () => removeExternal(r) }, "remove"));
@@ -221,11 +464,11 @@ async function togglePin(r, col) {
     const s = await ensureStream();
     if (r.pinned) { await db.removePin(s.id, r.id); S.pins = S.pins.filter((p) => p.paper_id !== r.id); toast("Unpinned"); }
     else { await db.addPin(s.id, r.id, r.col || col); S.pins.push({ paper_id: r.id, col: r.col || col }); toast("Pinned to stream"); }
-    runSearch();
+    render();
   } catch (e) { toast("Pin failed: " + e.message); console.error(e); }
 }
 async function removeExternal(r) {
-  try { await db.deleteExternal(r.id); S.externals = S.externals.filter((x) => x.id !== r.id); toast("Removed"); runSearch(); }
+  try { await db.deleteExternal(r.id); S.externals = S.externals.filter((x) => x.id !== r.id); toast("Removed"); render(); }
   catch (e) { toast("Remove failed: " + e.message); }
 }
 async function addExternal() {

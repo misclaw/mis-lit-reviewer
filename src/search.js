@@ -132,12 +132,14 @@ export function cosineQB64(qvec, b64) {
   return Math.max(0, dot / 127);
 }
 
-// filters: { top, journalYears, confYears, preprintYears }  (years = window or null=all)
+// filters: { top, journalYears, confYears, preprintYears, venueOff?, cols? }
+//   venueOff = Set of venue names to exclude; cols = Set of enabled columns.
 export async function search(query, filters = {}) {
   if (!DATA) throw new Error("index not loaded");
   const qv = await embedQuery(query);
   const { dim, count, papers, emb, currentYear } = DATA;
   const top = filters.top || 25;
+  const off = filters.venueOff, on = filters.cols;
   const floor = {
     journal: filters.journalYears ? currentYear - filters.journalYears + 1 : null,
     conference: filters.confYears ? currentYear - filters.confYears + 1 : null,
@@ -146,6 +148,8 @@ export async function search(query, filters = {}) {
   const buckets = { journal: [], conference: [], preprint: [] };
   for (let r = 0; r < count; r++) {
     const p = papers[r];
+    if (on && !on.has(p.col)) continue;
+    if (off && off.size && off.has(p.venue || "Unknown")) continue;
     const f = floor[p.col];
     if (f && p.year && p.year < f) continue;
     let s = 0;

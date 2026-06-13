@@ -1,11 +1,12 @@
 // MIS Lit Reviewer — static entry point. No auth: the app boots straight into
-// the search UI. Streams / pins / notes live in this browser (localStorage);
-// the header offers Export / Import JSON for backup or moving devices.
+// the unified workbench (date-sorted corpus browser that becomes a three-column
+// semantic search the moment you type). Streams / pins / notes live in this
+// browser (localStorage); the header offers Export / Import JSON for backup.
 import "./style.css";
 import { mountApp } from "./app.js";
-import { mountBrowse } from "./browse.js";
 import { exportStore, importStore } from "./store.js";
 
+const DIGEST_URL = "https://mis-digest.misclaw.app";
 const main = document.getElementById("main");
 const controls = document.getElementById("data-controls");
 
@@ -62,41 +63,19 @@ function mountDataControls() {
   controls.replaceChildren(note, exp, imp, file);
 }
 
-// ---- tabs: Search (semantic search workbench) | Browse (corpus by date) ----
-const views = {};
-let browseMounted = false;
-
-function switchTab(id) {
-  for (const [k, v] of Object.entries(views)) v.classList.toggle("active", k === id);
-  for (const b of document.querySelectorAll("#nav-tabs .tab")) b.classList.toggle("active", b.dataset.tab === id);
-  if (location.hash !== "#" + id) history.replaceState(null, "", "#" + id);
-  if (id === "browse" && !browseMounted) { browseMounted = true; mountBrowse(views.browse); }
-}
-
-function mountTabs() {
+// ---- header link to the separate daily-digest subscription site ----
+function mountNav() {
   const nav = document.getElementById("nav-tabs");
-  for (const [id, label] of [["search", "Search"], ["browse", "Browse"]]) {
-    const b = document.createElement("button");
-    b.className = "tab";
-    b.dataset.tab = id;
-    b.textContent = label;
-    b.addEventListener("click", () => switchTab(id));
-    nav.append(b);
-  }
+  nav.append(Object.assign(document.createElement("a"), {
+    href: DIGEST_URL, className: "nav-link", title: "Subscribe to the daily email digest of new IS papers",
+    innerHTML: '<span aria-hidden="true">✉</span> Daily digest',
+  }));
 }
 
 mountDataControls();
+mountNav();
 main.replaceChildren();
-for (const id of ["search", "browse"]) {
-  const v = document.createElement("div");
-  v.className = "view";
-  views[id] = v;
-  main.append(v);
-}
-mountTabs();
-mountApp(views.search);
-switchTab(location.hash === "#browse" ? "browse" : "search");
-window.addEventListener("hashchange", () => {
-  const id = location.hash === "#browse" ? "browse" : "search";
-  switchTab(id);
-});
+const view = document.createElement("div");
+view.className = "view active";
+main.append(view);
+mountApp(view);
