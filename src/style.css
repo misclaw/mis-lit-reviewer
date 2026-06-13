@@ -147,8 +147,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .filters select{padding:3px 6px;font-size:12.5px}
 .spacer{flex:1}
 
-.columns{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:16px 18px;overflow:auto;flex:1}
-.col{display:flex;flex-direction:column;min-width:0}
+.columns{display:flex;align-items:flex-start;gap:14px;padding:16px 18px;overflow:auto;flex:1}
+.col{display:flex;flex-direction:column;min-width:0;flex:1 1 0}
 .col-head{position:sticky;top:0;background:var(--bg);display:flex;align-items:center;gap:8px;
   padding:4px 4px 10px;font-weight:700;font-size:13px;z-index:2}
 .col-head .dot{width:9px;height:9px;border-radius:50%}
@@ -201,6 +201,19 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .col:hover .col-x{opacity:.7}
 .col-x:hover{opacity:1}
 .col-foot{text-align:center;padding:8px 0 4px}
+/* revive tabs: one per hidden column, pinned to the right edge of the board */
+.col-rails{display:flex;align-items:flex-start;gap:8px;flex:none}
+.col-rail{position:sticky;top:4px;flex:none;width:42px;display:flex;flex-direction:column;align-items:center;
+  gap:11px;padding:14px 0;border:1px dashed var(--line);border-radius:10px;background:var(--panel-soft);
+  color:var(--muted);cursor:pointer;transition:background .12s,border-color .12s,color .12s}
+.col-rail:hover{border-style:solid;border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.col-rail .dot{width:9px;height:9px;border-radius:50%;flex:none}
+.col-rail.col-journal .dot{background:var(--accent)}
+.col-rail.col-conference .dot{background:var(--green-fg)}
+.col-rail.col-preprint .dot{background:var(--orange-fg)}
+.col-rail-label{writing-mode:vertical-rl;transform:rotate(180deg);font-weight:700;font-size:12px;
+  letter-spacing:.02em;white-space:nowrap}
+.col-rail-plus{font-size:16px;font-weight:700;line-height:1}
 .card.fresh{border-color:var(--fresh-line);box-shadow:0 0 0 1px var(--fresh-inset) inset,var(--shadow)}
 .badge.new{background:var(--accent-soft);color:var(--accent);border:1px solid var(--blue-line)}
 
@@ -238,6 +251,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   .columns{display:flex!important;flex-direction:column;overflow:visible;padding:12px;gap:18px}
   .col-head{position:static}
   .col-x{opacity:.7}  /* no hover on touch — keep the hide control visible */
+  /* revive tabs: full-width buttons, lifted to the top of the stack so they
+     stay discoverable instead of hiding below every column */
+  .col-rails{order:-1;flex-direction:column;align-items:stretch;width:100%;gap:10px;margin-bottom:4px}
+  .col-rail{position:static;width:auto;flex-direction:row;justify-content:center;gap:8px;padding:11px}
+  .col-rail-label{writing-mode:horizontal-tb;transform:none}
   #stream-name{max-width:60%}
 
   /* dropdown panels: full-width sheet under the controls row instead of a

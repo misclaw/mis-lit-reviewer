@@ -95,18 +95,20 @@ export async function mountApp(root) {
           el("span", { id: "status", class: "muted" }),
           el("span", { id: "counts", class: "muted" })),
         addPanel(), notesPanel()),
-      el("div", { id: "cols", class: "columns" }, ...COLS.map(([k, label]) =>
-        el("div", { class: "col col-" + k, id: "col-" + k },
-          el("div", { class: "col-head" },
-            el("span", { class: "dot" }),
-            el("span", { class: "col-label" }, label),
-            el("span", { class: "cnt", id: "cnt-" + k }),
-            el("span", { class: "spacer" }),
-            el("button", { class: "col-x ghost", title: "Hide this column", onclick: () => toggleCol(k, false) }, "✕")),
-          el("div", { class: "col-list", id: "list-" + k }),
-          el("div", { class: "col-foot" },
-            el("button", { class: "ghost col-more", id: "more-" + k, hidden: true, onclick: () => renderColMore(k) }, "Show more"))))),
-      el("div", { id: "cols-empty", class: "col-note", hidden: true }, "All columns hidden — bring one back from “Columns ▾”."))));
+      el("div", { id: "cols", class: "columns" },
+        ...COLS.map(([k, label]) =>
+          el("div", { class: "col col-" + k, id: "col-" + k },
+            el("div", { class: "col-head" },
+              el("span", { class: "dot" }),
+              el("span", { class: "col-label" }, label),
+              el("span", { class: "cnt", id: "cnt-" + k }),
+              el("span", { class: "spacer" }),
+              el("button", { class: "col-x ghost", title: "Hide this column", onclick: () => toggleCol(k, false) }, "✕")),
+            el("div", { class: "col-list", id: "list-" + k }),
+            el("div", { class: "col-foot" },
+              el("button", { class: "ghost col-more", id: "more-" + k, hidden: true, onclick: () => renderColMore(k) }, "Show more")))),
+        el("div", { id: "col-rails", class: "col-rails", hidden: true })),
+      el("div", { id: "cols-empty", class: "col-note", hidden: true }, "All columns hidden — click a tab on the right to bring one back."))));
 
   $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
   $("q").addEventListener("input", () => {
@@ -283,11 +285,19 @@ function toggleCol(k, on) {
 }
 function syncColumnsUI() {
   const on = COLS.filter(([k]) => S.colsOn.has(k));
-  $("cols").style.gridTemplateColumns = on.length ? `repeat(${on.length},minmax(0,1fr))` : "1fr";
   for (const [k] of COLS) {
     $("col-" + k).hidden = !S.colsOn.has(k);
     const cb = $("colcb-" + k); if (cb) cb.checked = S.colsOn.has(k);
   }
+  // right-edge tabs to revive each hidden column in one click
+  const rails = $("col-rails");
+  const hidden = COLS.filter(([k]) => !S.colsOn.has(k));
+  rails.replaceChildren(...hidden.map(([k, label]) =>
+    el("button", { class: "col-rail col-" + k, title: `Show the ${label} column`, onclick: () => toggleCol(k, true) },
+      el("span", { class: "dot" }),
+      el("span", { class: "col-rail-label" }, label),
+      el("span", { class: "col-rail-plus", "aria-hidden": "true" }, "+"))));
+  rails.hidden = hidden.length === 0;
   $("cols-empty").hidden = on.length > 0;
   const btn = $("cols-btn");
   if (btn) { btn.textContent = on.length === COLS.length ? "Columns ▾" : `Columns: ${on.length} ▾`; btn.classList.toggle("filtering", on.length < COLS.length); }
