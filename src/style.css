@@ -100,8 +100,15 @@ body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,
 
 /* sidebar */
 #sidebar{width:248px;flex:0 0 248px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column}
-.side-actions{padding:12px}
+.side-actions{padding:12px;display:flex;flex-direction:column;gap:8px}
 .side-actions button{width:100%}
+.lib-btn{display:flex;align-items:center;justify-content:center;gap:6px;color:var(--ink);border:1px solid var(--line)}
+.lib-btn:hover{background:var(--chip);border-color:var(--accent)}
+.lib-btn.active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+/* Save query: outlined-accent, distinct from the solid Search button */
+.searchbar .save{border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:600;white-space:nowrap}
+.searchbar .save:hover{background:var(--accent);color:#fff}
+#rerun-q{white-space:nowrap}
 #stream-list{list-style:none;margin:0;padding:6px;overflow:auto;flex:1}
 .stream{display:flex;align-items:center;gap:6px;padding:9px 10px;border-radius:8px;cursor:pointer;margin-bottom:2px}
 .stream:hover{background:var(--chip)}
@@ -215,6 +222,21 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .col-rail-label{writing-mode:vertical-rl;transform:rotate(180deg);font-weight:700;font-size:12px;
   letter-spacing:.02em;white-space:nowrap}
 .col-rail-plus{font-size:16px;font-weight:700;line-height:1}
+
+/* ---- cross-query pinned-papers library ---- */
+#pinned-view{display:none;flex:1;overflow:auto;padding:16px 18px}
+.workspace.pinned-mode .topbar,
+.workspace.pinned-mode #cols,
+.workspace.pinned-mode #col-rails,
+.workspace.pinned-mode #cols-empty{display:none}
+.workspace.pinned-mode #pinned-view{display:block}
+.pinned-head{max-width:860px;margin:0 auto 14px;display:flex;align-items:center;gap:12px}
+.pinned-head h2{font-size:18px;margin:0;font-weight:740;letter-spacing:-.01em}
+.pinned-list{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+.pin-sources{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:9px;font-size:11.5px}
+.pin-tag{font-size:11.5px;padding:2px 9px;border-radius:20px;border:1px solid var(--blue-line);
+  background:var(--accent-soft);color:var(--accent);cursor:pointer}
+.pin-tag:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
 .card.fresh{border-color:var(--fresh-line);box-shadow:0 0 0 1px var(--fresh-inset) inset,var(--shadow)}
 .badge.new{background:var(--accent-soft);color:var(--accent);border:1px solid var(--blue-line)}
 

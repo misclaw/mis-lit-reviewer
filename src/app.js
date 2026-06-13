@@ -35,7 +35,9 @@ const S = {
   colsOn: new Set(["journal", "conference", "preprint"]),
   sort: "added_desc",
   browse: { journal: { items: [], shown: 0 }, conference: { items: [], shown: 0 }, preprint: { items: [], shown: 0 } },
-  mode: "browse",
+  lastResults: null, // live search columns, kept so "Save" can snapshot them
+  view: "workbench", // "workbench" (browse/query/snapshot) | "pinned" (cross-query library)
+  mode: "browse",    // within workbench: "browse" | "query" | "snapshot"
 };
 const $ = (id) => document.getElementById(id);
 
@@ -67,7 +69,9 @@ export async function mountApp(root) {
   loadPrefs();
   root.replaceChildren(el("div", { class: "shell" },
     el("aside", { id: "sidebar" },
-      el("div", { class: "side-actions" }, el("button", { class: "primary", id: "new-stream", onclick: newStream }, "+ New query stream")),
+      el("div", { class: "side-actions" },
+        el("button", { class: "primary", id: "new-stream", onclick: newStream }, "+ New query stream"),
+        el("button", { class: "ghost lib-btn", id: "pinned-btn", onclick: showPinned }, "★ Pinned papers")),
       el("ul", { id: "stream-list" })),
     el("section", { class: "workspace" },
       el("div", { class: "topbar" },
@@ -81,6 +85,8 @@ export async function mountApp(root) {
         el("div", { class: "searchbar" },
           el("input", { id: "q", placeholder: "Search the corpus in plain language — or leave blank to browse by date  (Enter to search)" }),
           el("button", { class: "primary", id: "go", onclick: runSearch }, "Search"),
+          el("button", { class: "save", id: "save-q", hidden: true, onclick: saveQuery, title: "Save this query and a snapshot of its results to the sidebar" }, "☆ Save query"),
+          el("button", { class: "ghost", id: "rerun-q", hidden: true, onclick: () => runSearch(), title: "Re-run this saved query against the current (live) corpus" }, "↻ Re-run"),
           el("button", { class: "ghost", id: "clear-q", hidden: true, onclick: clearQuery }, "Clear")),
         el("div", { class: "q-expansion muted", id: "q-expansion", hidden: true }),
         el("div", { class: "filters" },
@@ -109,7 +115,8 @@ export async function mountApp(root) {
             el("div", { class: "col-foot" },
               el("button", { class: "ghost col-more", id: "more-" + k, hidden: true, onclick: () => renderColMore(k) }, "Show more")))),
         el("div", { id: "col-rails", class: "col-rails", hidden: true })),
-      el("div", { id: "cols-empty", class: "col-note", hidden: true }, "All columns hidden — click a tab on the right to bring one back."))));
+      el("div", { id: "cols-empty", class: "col-note", hidden: true }, "All columns hidden — click a tab on the right to bring one back."),
+      el("div", { id: "pinned-view" }))));
 
   $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
   $("q").addEventListener("input", () => {
@@ -143,6 +150,7 @@ export async function mountApp(root) {
 
   try { S.streams = await db.listStreams(); } catch (e) { toast("Streams unavailable: " + e.message); }
   renderSidebar();
+  updatePinnedCount();
 }
 
 const sel = (id, label, opts, s) => el("label", {}, label + " ",
@@ -168,12 +176,19 @@ function buildCorpus(recent) {
 
 // ---- top-level render: pick browse vs query mode from the query box ----
 function render() {
+  exitPinned();
   const q = $("q").value.trim();
   S.mode = q && engine.isLoaded() ? "query" : "browse";
   $("clear-q").hidden = !$("q").value;
   $("f-sort").disabled = S.mode === "query"; // ranking is by relevance while searching
   if (S.mode === "query") runSearch();
   else renderBrowse();
+}
+// Re-render whatever view is currently showing (after a pin/unpin etc.)
+function rerenderCurrent() {
+  if (S.view === "pinned") return renderPinned();
+  if (S.mode === "snapshot" && S.current?.snapshot?.length) return renderSnapshot(S.current.snapshot);
+  return render();
 }
 
 function clearQuery() {
@@ -218,6 +233,7 @@ function renderBrowse() {
     parts.push(items.length);
   }
   $("counts").textContent = parts.length ? parts.join(" / ") : "";
+  updateActionButtons();
 }
 function renderColMore(k) {
   if (S.mode !== "browse") return;
@@ -356,13 +372,16 @@ async function newStream() {
 }
 async function selectStream(id) {
   const s = S.streams.find((x) => x.id === id); if (!s) return;
+  exitPinned();
   S.current = s;
   [S.externals, S.pins] = await Promise.all([db.listExternals(id), db.listPins(id)]);
   $("stream-name").value = s.name; $("stream-name").disabled = false;
   $("scratch-badge").hidden = true; $("notes").value = s.notes || "";
   $("export-bib").hidden = false; applyFilters(s.filters); $("q").value = s.query || "";
+  $("clear-q").hidden = !$("q").value;
   renderSidebar();
-  render();
+  if (s.snapshot?.length) renderSnapshot(s.snapshot); // show the frozen results
+  else render();                                      // no snapshot → live
 }
 async function deleteStream(s) {
   if (!confirm(`Delete stream “${s.name}”? Its pins, notes and added papers are removed.`)) return;
@@ -408,6 +427,7 @@ async function runSearch() {
     else exp.hidden = true;
     const cols = { journal: [...res.journal], conference: [...res.conference], preprint: [...res.preprint] };
     if (S.current) mergeStream(cols);
+    S.lastResults = cols; // remember for "Save query" snapshot
     const parts = [];
     for (const [k] of COLS) {
       if (!S.colsOn.has(k)) continue;
@@ -418,6 +438,7 @@ async function runSearch() {
       parts.push(cols[k].length);
     }
     $("counts").textContent = parts.join(" / ");
+    updateActionButtons();
     if (S.current) saveMeta();
   } catch (e) { toast("Search failed: " + e.message); console.error(e); }
 }
@@ -438,6 +459,159 @@ function mergeStream(cols) {
     if (p) { const col = cols[p.col] || cols.journal; col.unshift({ ...p, score: engine.scorePaper(S.qvec, p), pinned: true }); }
   }
   for (const k of Object.keys(cols)) cols[k].sort((a, b) => (a.pinned ? 0 : 1) - (b.pinned ? 0 : 1) || (b.score || 0) - (a.score || 0));
+}
+
+// ---- save query (frozen result snapshot) + re-run ----
+const SNAP_FIELDS = ["id", "col", "score", "title", "authors", "year", "venue", "doi", "url", "abstract", "fresh", "external", "cited"];
+function buildSnapshot() {
+  const snap = [];
+  for (const [k] of COLS) for (const r of (S.lastResults?.[k] || [])) {
+    const e = {}; for (const f of SNAP_FIELDS) if (r[f] !== undefined) e[f] = r[f];
+    e.col = e.col || k;
+    snap.push(e);
+  }
+  return snap;
+}
+async function saveQuery() {
+  const q = $("q").value.trim();
+  if (!q) return toast("Run a search first — Save captures its results");
+  if (!S.lastResults) return toast("Run the search, then Save");
+  const snapshot = buildSnapshot();
+  try {
+    if (S.current) {
+      S.current = await db.updateStream(S.current.id, { query: q, filters: readFilters(), snapshot });
+      S.streams = S.streams.map((x) => (x.id === S.current.id ? S.current : x));
+      toast(`Snapshot updated — ${snapshot.length} papers`);
+    } else {
+      const created = await db.createStream(q.slice(0, 60), q, readFilters());
+      S.current = await db.updateStream(created.id, { snapshot });
+      S.streams.unshift(S.current); S.externals = []; S.pins = [];
+      $("stream-name").value = S.current.name; $("stream-name").disabled = false;
+      $("scratch-badge").hidden = true; $("export-bib").hidden = false;
+      toast(`Query saved — ${snapshot.length} papers`);
+    }
+    renderSidebar();
+    updateActionButtons();
+  } catch (e) { toast("Save failed: " + e.message); }
+}
+
+// Render a saved query's frozen snapshot into the columns (no live search).
+function renderSnapshot(snap) {
+  exitPinned();
+  S.mode = "snapshot";
+  $("q-expansion").hidden = true;
+  $("f-sort").disabled = true;
+  const pinnedIds = new Set(S.pins.map((p) => p.paper_id));
+  const byCol = { journal: [], conference: [], preprint: [] };
+  for (const r of snap) (byCol[r.col] || byCol.journal).push(r);
+  const parts = [];
+  for (const [k] of COLS) {
+    if (!S.colsOn.has(k)) continue;
+    $("more-" + k).hidden = true;
+    const items = byCol[k] || [];
+    $("cnt-" + k).textContent = items.length;
+    const list = $("list-" + k); list.replaceChildren();
+    if (!items.length) list.append(el("div", { class: "col-empty" }, "—"));
+    else for (const r of items) list.append(card({ ...r, pinned: pinnedIds.has(r.id) }, k));
+    parts.push(items.length);
+  }
+  $("counts").textContent = parts.join(" / ");
+  updateActionButtons();
+}
+
+// Show Save in live-query mode, Re-run when viewing a snapshot, neither in browse.
+function updateActionButtons() {
+  const save = $("save-q"), rerun = $("rerun-q");
+  if (!save || !rerun) return;
+  if (S.view === "pinned") { save.hidden = true; rerun.hidden = true; return; }
+  if (S.mode === "query") {
+    save.hidden = false;
+    save.textContent = (S.current && S.current.snapshot?.length) ? "⤓ Update snapshot" : "☆ Save query";
+    rerun.hidden = true;
+  } else if (S.mode === "snapshot") {
+    save.hidden = true; rerun.hidden = false;
+  } else { save.hidden = true; rerun.hidden = true; }
+}
+
+// ---- cross-query pinned-papers library (paper-level, not query-level) ----
+async function updatePinnedCount() {
+  const btn = $("pinned-btn"); if (!btn) return;
+  let n = 0; try { n = await db.pinnedCount(); } catch {}
+  btn.textContent = n ? `★ Pinned papers (${n})` : "★ Pinned papers";
+}
+async function showPinned() {
+  S.view = "pinned";
+  document.querySelector(".workspace").classList.add("pinned-mode");
+  $("pinned-btn").classList.add("active");
+  for (const li of document.querySelectorAll("#stream-list .stream")) li.classList.remove("active");
+  await renderPinned();
+  updateActionButtons();
+}
+function exitPinned() {
+  if (S.view !== "pinned") return;
+  S.view = "workbench";
+  document.querySelector(".workspace").classList.remove("pinned-mode");
+  $("pinned-btn").classList.remove("active");
+}
+function closePinned() {
+  exitPinned();
+  if (S.current?.snapshot?.length) renderSnapshot(S.current.snapshot);
+  else render();
+}
+async function renderPinned() {
+  const wrap = $("pinned-view");
+  let pins = [];
+  try { pins = await db.allPinnedPapers(); } catch {}
+  const list = el("div", { class: "pinned-list" });
+  if (!pins.length) {
+    list.append(el("div", { class: "col-note" }, "No pinned papers yet. Open a query and pin (☆) the papers worth keeping — they collect here, tagged with the query they came from."));
+  } else {
+    for (const pin of pins) {
+      const p = engine.paperById(pin.paper_id);
+      if (p) list.append(pinnedCard(p, pin));
+    }
+  }
+  wrap.replaceChildren(
+    el("div", { class: "pinned-head" },
+      el("button", { class: "ghost", onclick: closePinned }, "← Back"),
+      el("h2", {}, "★ Pinned papers"),
+      el("span", { class: "muted" }, `${pins.length} paper${pins.length === 1 ? "" : "s"} across your saved queries`)),
+    list);
+}
+function pinnedCard(p, pin) {
+  const authors = (p.authors || []).slice(0, 5).join(", ") + ((p.authors || []).length > 5 ? " et al." : "");
+  const meta = el("div", { class: "meta" });
+  if (!p.abstract) meta.append(el("span", { class: "badge noabs" }, "no abstract"));
+  meta.append(document.createTextNode([authors, p.year, p.venue].filter(Boolean).join(" · ")));
+  if (p.cited > 0) meta.append(el("span", { class: "muted" }, ` · ${p.cited.toLocaleString()} cite${p.cited === 1 ? "" : "s"}`));
+  const link = p.url || (p.doi ? "https://doi.org/" + p.doi.replace(/^https?:\/\/doi\.org\//, "") : null);
+  const ttl = link ? el("a", { href: link, target: "_blank", rel: "noopener" }, p.title || "(untitled)") : document.createTextNode(p.title || "(untitled)");
+  const abs = el("div", { class: "abs" }, p.abstract || "— no abstract on record —");
+  const c = el("div", { class: "card pinned" }, el("div", { class: "ttl" }, ttl), meta, abs);
+  requestAnimationFrame(() => {
+    if (abs.scrollHeight > abs.clientHeight + 4) {
+      abs.classList.add("clip");
+      const more = el("span", { class: "more", onclick: () => { abs.classList.toggle("expanded"); abs.classList.toggle("clip"); more.textContent = abs.classList.contains("expanded") ? "show less" : "show more"; } }, "show more");
+      abs.after(more);
+    }
+  });
+  const tags = el("div", { class: "pin-sources" }, el("span", { class: "muted" }, "pinned in: "));
+  for (const s of pin.sources) tags.append(el("button", { class: "pin-tag", title: "Open this query", onclick: () => selectStream(s.id) }, s.name));
+  const acts = el("div", { class: "acts" },
+    el("button", { class: "ghost", onclick: () => cite(p) }, "❝ cite"),
+    el("span", { class: "spacer" }),
+    el("button", { class: "ghost", onclick: () => removeFromLibrary(pin) }, "remove from library"));
+  c.append(tags, acts);
+  return c;
+}
+async function removeFromLibrary(pin) {
+  try {
+    for (const s of pin.sources) await db.removePin(s.id, pin.paper_id);
+    if (S.current) S.pins = await db.listPins(S.current.id);
+    toast("Removed from library");
+    updatePinnedCount();
+    renderPinned();
+  } catch (e) { toast("Remove failed: " + e.message); }
 }
 
 // ---- card (shared by browse + query) ----
@@ -477,9 +651,10 @@ function card(r, col) {
 async function togglePin(r, col) {
   try {
     const s = await ensureStream();
-    if (r.pinned) { await db.removePin(s.id, r.id); S.pins = S.pins.filter((p) => p.paper_id !== r.id); toast("Unpinned"); }
-    else { await db.addPin(s.id, r.id, r.col || col); S.pins.push({ paper_id: r.id, col: r.col || col }); toast("Pinned to stream"); }
-    render();
+    if (r.pinned) { await db.removePin(s.id, r.id); S.pins = S.pins.filter((p) => p.paper_id !== r.id); toast("Unpinned from this query"); }
+    else { await db.addPin(s.id, r.id, r.col || col); S.pins.push({ paper_id: r.id, col: r.col || col }); toast("Pinned — added to your library"); }
+    updatePinnedCount();
+    rerenderCurrent();
   } catch (e) { toast("Pin failed: " + e.message); console.error(e); }
 }
 async function removeExternal(r) {

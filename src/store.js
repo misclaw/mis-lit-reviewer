@@ -44,6 +44,7 @@ export async function createStream(name, query = "", filters = {}) {
   const d = load();
   const row = {
     id: uuid(), name, query, filters,
+    snapshot: [], // frozen result set captured on Save (self-contained card records)
     notes: "", position: 0, created_at: now(), updated_at: now(),
   };
   d.streams.push(row);
@@ -110,6 +111,24 @@ export async function removePin(streamId, paperId) {
   const d = load();
   d.pins = d.pins.filter((p) => !(p.stream_id === streamId && p.paper_id === paperId));
   save(d);
+}
+// Cross-query library: every paper pinned in ANY saved query, deduped by
+// paper, tagged with the queries it was pinned from. Paper-level, not query-level.
+export async function allPinnedPapers() {
+  const d = load();
+  const nameOf = new Map(d.streams.map((s) => [s.id, s.name]));
+  const byPaper = new Map();
+  for (const p of d.pins) {
+    const e = byPaper.get(p.paper_id) || { paper_id: p.paper_id, col: p.col, sources: [], created_at: p.created_at };
+    if (!e.sources.some((s) => s.id === p.stream_id)) e.sources.push({ id: p.stream_id, name: nameOf.get(p.stream_id) || "(deleted query)" });
+    if (p.created_at < e.created_at) e.created_at = p.created_at;
+    byPaper.set(p.paper_id, e);
+  }
+  return [...byPaper.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+export async function pinnedCount() {
+  const d = load();
+  return new Set(d.pins.map((p) => p.paper_id)).size;
 }
 
 // ---- export / import (whole store as JSON) ----

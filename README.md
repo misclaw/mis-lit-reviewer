@@ -12,8 +12,12 @@ conferences, and preprints — in **one unified view**:
 - **Free venue + column control** — every venue is selected by default; uncheck
   any to exclude it. Hide any of the three type-columns (the layout collapses to
   2- or 1-column) and bring them back from "Columns ▾".
-- **Workbench** — save query streams, pin papers, attach your own sources, keep
-  notes, export `.bib` — all stored locally (localStorage), with Export /
+- **Workbench** — **Save** a query to freeze a snapshot of its results in the
+  sidebar (with a **Re-run** to refresh against the live corpus); pin papers,
+  attach your own sources, keep notes, export `.bib`. Pins are **query-scoped**
+  (a paper pinned in query A isn't pinned in query B), and a separate
+  **★ Pinned papers** view collects everything you've pinned across all queries,
+  tagged by source query. All stored locally (localStorage), with Export /
   Import JSON backup.
 
 🔎 No server and no accounts: query embedding (bge-small via transformers.js)
