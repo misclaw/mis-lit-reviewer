@@ -48,6 +48,21 @@ const VENUE_ABBR = {
 };
 const venueLabel = (v) => VENUE_ABBR[v] || v;
 
+// Curated venue order for the chips: premier IS journals first, then the rest
+// of the IS basket, adjacent management/OR journals, the IS conferences, and
+// finally preprints. Venues not listed fall to the end (by paper count).
+const VENUE_ORDER = [
+  "MIS Quarterly", "Information Systems Research", "Journal of Management Information Systems",
+  "Journal of the Association for Information Systems", "Management Science",
+  "European Journal of Information Systems", "Information Systems Journal",
+  "Journal of Information Technology", "Journal of Strategic Information Systems",
+  "Organization Science", "Marketing Science",
+  "Production and Operations Management", "Manufacturing & Service Operations Management",
+  "ICIS", "ECIS", "AMCIS", "PACIS",
+  "SSRN",
+];
+const venueRank = (v) => { const i = VENUE_ORDER.indexOf(v); return i === -1 ? VENUE_ORDER.length : i; };
+
 // "panel-left" glyph for the sidebar collapse/expand toggle.
 const PANEL_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>';
 
@@ -217,7 +232,7 @@ function buildCorpus(recent) {
     venueCount.set(v, (venueCount.get(v) || 0) + 1);
   }
   S.byCol = byCol;
-  S.venues = [...venueCount.entries()].sort((a, b) => b[1] - a[1]);
+  S.venues = [...venueCount.entries()].sort((a, b) => venueRank(a[0]) - venueRank(b[0]) || b[1] - a[1]);
   renderVenueChips();
 }
 
@@ -707,7 +722,6 @@ function card(r, col) {
   if (!r.abstract) meta.append(el("span", { class: "badge noabs" }, "no abstract"));
   meta.append(document.createTextNode([authors, r.year, r.venue].filter(Boolean).join(" · ")));
   if (r.cited > 0) meta.append(el("span", { class: "muted" }, ` · ${r.cited.toLocaleString()} cite${r.cited === 1 ? "" : "s"}`));
-  if (r.added && S.mode === "browse") meta.append(el("span", { class: "muted" }, ` · added ${r.added}`));
 
   const link = r.url || (r.doi ? "https://doi.org/" + r.doi.replace(/^https?:\/\/doi\.org\//, "") : null);
   const ttl = link ? el("a", { href: link, target: "_blank", rel: "noopener" }, r.title || "(untitled)") : document.createTextNode(r.title || "(untitled)");
