@@ -66,18 +66,23 @@ const S = {
 };
 const $ = (id) => document.getElementById(id);
 
-// ---- view prefs (columns shown + sort) persist; venue selection resets to
-// "all" each load so the default is always every venue checked. ----
+// ---- view prefs persist across refresh / new tabs: columns shown, sort,
+// sidebar fold, and the venue chip selection (excluded venues). ----
 function loadPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
     if (Array.isArray(p.cols) && p.cols.length) S.colsOn = new Set(p.cols.filter((c) => COLS.some(([k]) => k === c)));
     if (SORTS.some(([v]) => v === p.sort)) S.sort = p.sort;
     if (typeof p.sidebarCollapsed === "boolean") S.sidebarCollapsed = p.sidebarCollapsed;
+    if (Array.isArray(p.venueOff)) S.venueOff = new Set(p.venueOff);
   } catch {}
 }
 function savePrefs() {
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ cols: [...S.colsOn], sort: S.sort, sidebarCollapsed: S.sidebarCollapsed })); } catch {}
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({
+      cols: [...S.colsOn], sort: S.sort, sidebarCollapsed: S.sidebarCollapsed, venueOff: [...S.venueOff],
+    }));
+  } catch {}
 }
 
 // ---- sidebar fold / unfold (collapses the query-stream rail to widen the board) ----
@@ -121,14 +126,13 @@ export async function mountApp(root) {
           el("input", { id: "stream-name", placeholder: "Scratch search", disabled: true, onchange: renameCurrent }),
           el("span", { class: "scratch-badge", id: "scratch-badge", hidden: true }, "scratch · not saved"),
           el("span", { class: "spacer" }),
+          el("button", { class: "ghost", id: "t-history", hidden: true, title: "Past queries in this stream — click one to roll back", onclick: () => { renderHistory(); $("history-panel").classList.toggle("open"); } }, "⟲ History"),
           el("button", { class: "ghost", id: "t-add", onclick: () => $("add-panel").classList.toggle("open") }, "+ Add paper"),
           el("button", { class: "ghost", id: "t-notes", onclick: () => $("notes-panel").classList.toggle("open") }, "Notes"),
           el("a", { class: "ghost", id: "export-bib", href: "#", hidden: true, onclick: exportBib }, "Export .bib")),
         el("div", { class: "searchbar" },
           el("input", { id: "q", placeholder: "Search the corpus in plain language — or leave blank to browse by date  (Enter to search)" }),
           el("button", { class: "primary", id: "go", onclick: runSearch }, "Search"),
-          el("button", { class: "save", id: "save-q", hidden: true, onclick: saveQuery, title: "Save this query and a snapshot of its results to the sidebar" }, "☆ Save query"),
-          el("button", { class: "ghost", id: "rerun-q", hidden: true, onclick: () => runSearch(), title: "Re-run this saved query against the current (live) corpus" }, "↻ Re-run"),
           el("button", { class: "ghost", id: "clear-q", hidden: true, onclick: clearQuery }, "Clear")),
         el("div", { class: "q-expansion muted", id: "q-expansion", hidden: true }),
         el("div", { class: "filters" },
@@ -143,7 +147,7 @@ export async function mountApp(root) {
           el("span", { id: "status", class: "muted" }),
           el("span", { id: "counts", class: "muted" })),
         venueChips(),
-        addPanel(), notesPanel()),
+        historyPanel(), addPanel(), notesPanel()),
       el("div", { id: "cols", class: "columns" },
         ...COLS.map(([k, label]) =>
           el("div", { class: "col col-" + k, id: "col-" + k },
@@ -303,11 +307,13 @@ function venueChips() {
 function toggleVenue(v) {
   S.venueOff.has(v) ? S.venueOff.delete(v) : S.venueOff.add(v);
   renderVenueChips();
+  savePrefs();
   render();
 }
 function setAllVenues(on) {
   S.venueOff = on ? new Set() : new Set(S.venues.map(([v]) => v));
   renderVenueChips();
+  savePrefs();
   render();
 }
 // All selected → clear them; anything excluded → restore the full set.
@@ -399,6 +405,43 @@ function addPanel() {
 function notesPanel() {
   return el("div", { class: "panel", id: "notes-panel" }, el("textarea", { id: "notes", placeholder: "Notes for this query stream… (autosaves)" }));
 }
+function historyPanel() {
+  return el("div", { class: "panel", id: "history-panel" },
+    el("div", { class: "hint" }, "Every search in this stream is saved here. Click a past query to roll back to it."),
+    el("div", { class: "history-list", id: "history-list" }));
+}
+
+// Relative "time ago" for history timestamps (kept tiny — no date lib).
+function timeAgo(iso) {
+  if (!iso) return "";
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  const m = s / 60; if (m < 60) return `${Math.floor(m)}m ago`;
+  const h = m / 60; if (h < 24) return `${Math.floor(h)}h ago`;
+  const d = h / 24; if (d < 7) return `${Math.floor(d)}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+function renderHistory() {
+  const list = $("history-list");
+  if (!list) return;
+  const hist = S.current?.history || [];
+  if (!hist.length) { list.replaceChildren(el("div", { class: "col-empty" }, "No searches yet in this stream.")); return; }
+  list.replaceChildren(...hist.map((h) => {
+    const active = h.q === ($("q").value.trim());
+    return el("button", { class: "history-row" + (active ? " current" : ""), title: "Roll back to this query", onclick: () => restoreHistory(h) },
+      el("span", { class: "history-q" }, h.q),
+      el("span", { class: "history-at" }, timeAgo(h.at)));
+  }));
+}
+// Roll back: restore an earlier query + its filters and re-run it (which then
+// becomes the stream's current snapshot again).
+function restoreHistory(h) {
+  $("history-panel").classList.remove("open");
+  if (h.filters) applyFilters(h.filters);
+  $("q").value = h.q;
+  $("clear-q").hidden = !h.q;
+  runSearch();
+}
 
 // ---- streams sidebar ----
 function renderSidebar() {
@@ -411,10 +454,11 @@ function renderSidebar() {
   }
 }
 async function newStream() {
-  const name = prompt("Name this query stream:", "Untitled stream"); if (name === null) return;
+  const seedQ = $("q").value.trim(); // carry over a scratch query so it isn't lost
+  const name = prompt("Name this query stream:", seedQ ? seedQ.slice(0, 48) : "Untitled stream"); if (name === null) return;
   try {
-    const s = await db.createStream(name.trim() || "Untitled stream", "", readFilters());
-    S.streams.unshift(s); selectStream(s.id);
+    const s = await db.createStream(name.trim() || "Untitled stream", seedQ, readFilters());
+    S.streams.unshift(s); selectStream(s.id); // if it carries a query, selectStream runs it → auto-saves
   } catch (e) { toast("Could not create stream: " + e.message); }
 }
 async function selectStream(id) {
@@ -426,7 +470,8 @@ async function selectStream(id) {
   $("scratch-badge").hidden = true; $("notes").value = s.notes || "";
   $("export-bib").hidden = false; applyFilters(s.filters); $("q").value = s.query || "";
   $("clear-q").hidden = !$("q").value;
-  renderSidebar();
+  for (const p of ["history-panel", "add-panel", "notes-panel"]) $(p)?.classList.remove("open");
+  renderSidebar(); renderHistory();
   if (s.snapshot?.length) renderSnapshot(s.snapshot); // show the frozen results
   else render();                                      // no snapshot → live
 }
@@ -455,8 +500,6 @@ async function ensureStream() {
   renderSidebar(); return s;
 }
 
-const saveMeta = debounce(async () => { if (S.current) await db.updateStream(S.current.id, { query: $("q").value, filters: readFilters() }); }, 600);
-
 // ---- query mode: three-column semantic search ----
 async function runSearch() {
   const q = $("q").value.trim();
@@ -474,7 +517,7 @@ async function runSearch() {
     else exp.hidden = true;
     const cols = { journal: [...res.journal], conference: [...res.conference], preprint: [...res.preprint] };
     if (S.current) mergeStream(cols);
-    S.lastResults = cols; // remember for "Save query" snapshot
+    S.lastResults = cols; // remember for the auto-saved snapshot
     const parts = [];
     for (const [k] of COLS) {
       if (!S.colsOn.has(k)) continue;
@@ -485,8 +528,8 @@ async function runSearch() {
       parts.push(cols[k].length);
     }
     $("counts").textContent = parts.join(" / ");
+    if (S.current) await autoSaveStream(q);
     updateActionButtons();
-    if (S.current) saveMeta();
   } catch (e) { toast("Search failed: " + e.message); console.error(e); }
 }
 
@@ -508,8 +551,11 @@ function mergeStream(cols) {
   for (const k of Object.keys(cols)) cols[k].sort((a, b) => (a.pinned ? 0 : 1) - (b.pinned ? 0 : 1) || (b.score || 0) - (a.score || 0));
 }
 
-// ---- save query (frozen result snapshot) + re-run ----
+// ---- auto-saved snapshot + per-stream history ----
+// Every search in an active stream rewrites its frozen snapshot and pushes the
+// query onto its history (newest first, deduped, capped). No manual Save button.
 const SNAP_FIELDS = ["id", "col", "score", "title", "authors", "year", "venue", "doi", "url", "abstract", "fresh", "external", "cited"];
+const HISTORY_CAP = 25;
 function buildSnapshot() {
   const snap = [];
   for (const [k] of COLS) for (const r of (S.lastResults?.[k] || [])) {
@@ -519,27 +565,22 @@ function buildSnapshot() {
   }
   return snap;
 }
-async function saveQuery() {
-  const q = $("q").value.trim();
-  if (!q) return toast("Run a search first — Save captures its results");
-  if (!S.lastResults) return toast("Run the search, then Save");
+function recordHistory(q, filters) {
+  const h = (S.current.history || []).filter((e) => e.q !== q); // de-dupe → move to front
+  h.unshift({ q, filters, at: new Date().toISOString() });
+  if (h.length > HISTORY_CAP) h.length = HISTORY_CAP;
+  S.current.history = h;
+}
+async function autoSaveStream(q) {
+  if (!S.lastResults) return;
+  recordHistory(q, readFilters());
   const snapshot = buildSnapshot();
   try {
-    if (S.current) {
-      S.current = await db.updateStream(S.current.id, { query: q, filters: readFilters(), snapshot });
-      S.streams = S.streams.map((x) => (x.id === S.current.id ? S.current : x));
-      toast(`Snapshot updated — ${snapshot.length} papers`);
-    } else {
-      const created = await db.createStream(q.slice(0, 60), q, readFilters());
-      S.current = await db.updateStream(created.id, { snapshot });
-      S.streams.unshift(S.current); S.externals = []; S.pins = [];
-      $("stream-name").value = S.current.name; $("stream-name").disabled = false;
-      $("scratch-badge").hidden = true; $("export-bib").hidden = false;
-      toast(`Query saved — ${snapshot.length} papers`);
-    }
+    S.current = await db.updateStream(S.current.id, { query: q, filters: readFilters(), snapshot, history: S.current.history });
+    S.streams = S.streams.map((x) => (x.id === S.current.id ? S.current : x));
     renderSidebar();
-    updateActionButtons();
-  } catch (e) { toast("Save failed: " + e.message); }
+    renderHistory();
+  } catch (e) { console.error("auto-save failed", e); }
 }
 
 // Render a saved query's frozen snapshot into the columns (no live search).
@@ -566,18 +607,12 @@ function renderSnapshot(snap) {
   updateActionButtons();
 }
 
-// Show Save in live-query mode, Re-run when viewing a snapshot, neither in browse.
+// The only stream-scoped control left is History — show it whenever the active
+// stream has past queries to roll back to (snapshots now save automatically).
 function updateActionButtons() {
-  const save = $("save-q"), rerun = $("rerun-q");
-  if (!save || !rerun) return;
-  if (S.view === "pinned") { save.hidden = true; rerun.hidden = true; return; }
-  if (S.mode === "query") {
-    save.hidden = false;
-    save.textContent = (S.current && S.current.snapshot?.length) ? "⤓ Update snapshot" : "☆ Save query";
-    rerun.hidden = true;
-  } else if (S.mode === "snapshot") {
-    save.hidden = true; rerun.hidden = false;
-  } else { save.hidden = true; rerun.hidden = true; }
+  const hist = $("t-history");
+  if (!hist) return;
+  hist.hidden = !(S.view !== "pinned" && S.current && S.current.history?.length);
 }
 
 // ---- cross-query pinned-papers library (paper-level, not query-level) ----

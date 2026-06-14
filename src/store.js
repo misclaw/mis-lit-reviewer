@@ -44,7 +44,8 @@ export async function createStream(name, query = "", filters = {}) {
   const d = load();
   const row = {
     id: uuid(), name, query, filters,
-    snapshot: [], // frozen result set captured on Save (self-contained card records)
+    snapshot: [], // frozen result set, auto-rewritten on every search in this stream
+    history: [],  // past queries run in this stream (newest first) for one-click rollback
     notes: "", position: 0, created_at: now(), updated_at: now(),
   };
   d.streams.push(row);

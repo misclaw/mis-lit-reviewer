@@ -9,16 +9,22 @@ conferences, and preprints — in **one unified view**:
   appear with a "new" badge.
 - **Search by typing** — a natural-language query re-ranks the same three
   columns by meaning, running **entirely in your browser**.
-- **Free venue + column control** — every venue is selected by default; uncheck
-  any to exclude it. Hide any of the three type-columns (the layout collapses to
-  2- or 1-column) and bring them back from "Columns ▾".
-- **Workbench** — **Save** a query to freeze a snapshot of its results in the
-  sidebar (with a **Re-run** to refresh against the live corpus); pin papers,
-  attach your own sources, keep notes, export `.bib`. Pins are **query-scoped**
-  (a paper pinned in query A isn't pinned in query B), and a separate
-  **★ Pinned papers** view collects everything you've pinned across all queries,
-  tagged by source query. All stored locally (localStorage), with Export /
-  Import JSON backup.
+- **Free venue + column control** — venues are **choice chips** (shown by their
+  familiar abbreviations — ISR, MISQ, JAIS, ICIS…); every chip is selected by
+  default, click to exclude, and the selection is **remembered across refreshes
+  and new tabs**. Hide any of the three type-columns (the layout collapses to
+  2- or 1-column) and bring them back from "Columns ▾". The query-stream sidebar
+  folds away to widen the board.
+- **Workbench** — open a **query stream** and every search you run **auto-saves**
+  as that stream's snapshot and lands in its **⟲ History**, so you can roll back
+  to any earlier query with one click. Pin papers, attach your own sources, keep
+  notes, export `.bib`. Pins are **query-scoped** (a paper pinned in query A
+  isn't pinned in query B), and a separate **★ Pinned papers** view collects
+  everything you've pinned across all queries, tagged by source query. All stored
+  locally (localStorage), with Export / Import JSON backup.
+- **Guidance** — a **Guide** in the header explains the IS-focused workflow, and a
+  **🧪 Scholar Labs** link points to Google Scholar Labs for broad, cross-discipline
+  reviews this corpus deliberately doesn't try to cover.
 
 🔎 No server and no accounts: query embedding (bge-small via transformers.js)
 and cosine ranking happen client-side over shipped int8 embeddings. The email

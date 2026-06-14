@@ -111,10 +111,15 @@ body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,
 .lib-btn{display:flex;align-items:center;justify-content:center;gap:6px;color:var(--ink);border:1px solid var(--line)}
 .lib-btn:hover{background:var(--chip);border-color:var(--accent)}
 .lib-btn.active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
-/* Save query: outlined-accent, distinct from the solid Search button */
-.searchbar .save{border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:600;white-space:nowrap}
-.searchbar .save:hover{background:var(--accent);color:#fff}
-#rerun-q{white-space:nowrap}
+/* per-stream search history: clickable rows, newest first */
+.history-list{display:flex;flex-direction:column;gap:3px;max-height:300px;overflow:auto}
+.history-row{display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;
+  border:1px solid transparent;border-radius:7px;padding:7px 9px;background:transparent;color:var(--ink)}
+.history-row:hover{background:var(--chip);border-color:var(--line)}
+.history-row.current{border-color:var(--blue-line);background:var(--accent-soft)}
+.history-q{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.history-row.current .history-q{color:var(--accent);font-weight:600}
+.history-at{flex:none;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 #stream-list{list-style:none;margin:0;padding:6px;overflow:auto;flex:1}
 .stream{display:flex;align-items:center;gap:6px;padding:9px 10px;border-radius:8px;cursor:pointer;margin-bottom:2px}
 .stream:hover{background:var(--chip)}
@@ -215,8 +220,27 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 /* ---- merged view: header digest link, status, columns, fresh papers ---- */
 .nav-link{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--muted);
-  padding:6px 12px;border-radius:8px;text-decoration:none}
+  padding:6px 12px;border:1px solid transparent;border-radius:8px;background:none;text-decoration:none;cursor:pointer}
 .nav-link:hover{background:var(--chip);color:var(--accent);text-decoration:none}
+.nav-link svg{display:block}
+
+/* ---- help / guide modal ---- */
+.help-overlay{position:fixed;inset:0;z-index:50;display:none;align-items:flex-start;justify-content:center;
+  padding:6vh 16px;background:rgba(15,20,35,.5);overflow:auto}
+.help-overlay.open{display:flex}
+.help-card{position:relative;width:100%;max-width:620px;background:var(--panel);color:var(--ink);
+  border:1px solid var(--line);border-radius:14px;box-shadow:var(--pop-shadow);padding:26px 30px 24px}
+.help-close{position:absolute;top:12px;right:12px;width:30px;height:30px;display:inline-flex;align-items:center;
+  justify-content:center;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);font-size:14px}
+.help-close:hover{background:var(--chip);color:var(--ink)}
+.help-card h2{margin:0 0 10px;font-size:19px;font-weight:740;letter-spacing:-.01em}
+.help-card h3{margin:18px 0 8px;font-size:14px;font-weight:700;color:var(--ink)}
+.help-lead{margin:0 0 12px;color:var(--ink-soft);line-height:1.6}
+.help-note{margin:0;padding:11px 13px;background:var(--accent-soft);border:1px solid var(--blue-line);
+  border-radius:10px;color:var(--ink-soft);line-height:1.55;font-size:13px}
+.help-steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;line-height:1.55;color:var(--ink-soft)}
+.help-steps strong{color:var(--ink)}
+.help-foot{margin:16px 0 0;font-size:12.5px;color:var(--muted);line-height:1.55}
 #status{display:inline-flex;align-items:center;gap:4px}
 #status .live{color:var(--green-fg);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
 #counts{font-variant-numeric:tabular-nums}
