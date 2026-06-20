@@ -331,3 +331,35 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   .dd-panel{left:10px;right:10px;top:calc(100% - 4px);min-width:0;max-width:none}
   .dd-panel.narrow{min-width:0}
 }
+
+/* ---- import-from-Reference-Viewer modal ---- */
+.import-overlay{position:fixed;inset:0;z-index:60;display:none;align-items:flex-start;justify-content:center;
+  padding:6vh 16px;background:rgba(15,20,35,.5);overflow:auto}
+.import-overlay.open{display:flex}
+.import-card{position:relative;width:100%;max-width:520px;background:var(--panel);color:var(--ink);
+  border:1px solid var(--line);border-radius:14px;box-shadow:var(--pop-shadow);padding:24px 26px 20px}
+.import-close{position:absolute;top:12px;right:12px;width:30px;height:30px;display:inline-flex;align-items:center;
+  justify-content:center;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);font-size:14px;cursor:pointer}
+.import-close:hover{background:var(--chip);color:var(--ink)}
+.import-card h2{margin:0 0 6px;font-size:18px;font-weight:740;letter-spacing:-.01em}
+.import-lead{margin:0 0 14px;line-height:1.5;font-size:13px}
+.import-papers{display:flex;flex-direction:column;gap:2px;max-height:160px;overflow:auto;
+  border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel-soft);margin-bottom:14px}
+.import-paper{display:flex;align-items:baseline;gap:8px;font-size:13px;line-height:1.4;padding:2px 0}
+.import-paper .ip-title{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto}
+.import-paper .ip-meta{flex:none;font-size:11.5px;white-space:nowrap}
+.import-section-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 6px}
+.import-streams{display:flex;flex-direction:column;gap:2px;max-height:200px;overflow:auto}
+.import-empty{margin:2px 0 8px;font-size:13px}
+.import-stream{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:9px;cursor:pointer}
+.import-stream:hover{background:var(--chip)}
+.import-stream input{flex:none;accent-color:var(--accent);width:15px;height:15px}
+.import-stream .is-name{color:var(--ink);font-size:13.5px;font-weight:600}
+.import-stream .is-sub{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.import-newrow{display:flex;gap:8px;margin-top:10px}
+.import-newinput{flex:1 1 auto;padding:7px 11px;font-size:13px;color:var(--ink);background:var(--panel-soft);
+  border:1px solid var(--line);border-radius:8px}
+.import-newinput:focus{outline:none;border-color:var(--accent)}
+.import-actions{display:flex;align-items:center;gap:10px;margin-top:18px}
+.import-actions .spacer-fill{flex:1 1 auto}
+.import-status{font-size:12px}

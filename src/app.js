@@ -15,6 +15,7 @@ import * as db from "./store.js";
 import * as ingest from "./ingest.js";
 import { bibtex, cite as copyCite } from "./cite.js";
 import { el, toast, debounce } from "./dom.js";
+import { parseHandoff } from "./handoff.js";
 
 const COLS = [["journal", "Journals"], ["conference", "Conferences"], ["preprint", "Preprints"]];
 const DEFAULT_FILTERS = { top: 25, journalYears: null, confYears: null, preprintYears: 2 };
@@ -213,6 +214,8 @@ export async function mountApp(root) {
   try { S.streams = await db.listStreams(); } catch (e) { toast("Streams unavailable: " + e.message); }
   renderSidebar();
   updatePinnedCount();
+
+  runHandoff(); // if reference-viewer handed papers over in the URL, offer to file them
 }
 
 const sel = (id, label, opts, s) => el("label", {}, label + " ",
@@ -788,6 +791,132 @@ async function addExternal() {
     if ($("q").value.trim()) runSearch();
   } catch (e) { toast("Add failed: " + e.message); }
   finally { $("add-go").disabled = false; $("add-go").textContent = "Add"; }
+}
+
+// ---- inbound hand-off from Reference Viewer ------------------------------
+// reference-viewer opens us with a selection of discovered papers encoded in
+// the URL (#add=…; see handoff.js). We own the streams, so the picker lives
+// here: a modal to drop those papers into one or more streams at once (adding a
+// paper to several streams = a song to several playlists). Papers land as
+// `externals` — the same slot as the "+ Add paper" flow — deduped and embedded.
+const normTitle = (t) => String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+async function runHandoff() {
+  const h = parseHandoff(location.hash);
+  if (!h) return;
+  // consume the payload so a refresh / back-nav doesn't re-import it.
+  history.replaceState(null, "", location.pathname + location.search);
+  openImportModal(h.papers);
+}
+
+function openImportModal(papers) {
+  const n = papers.length;
+  const checks = new Map(); // streamId -> checkbox input
+
+  const streamList = el("div", { class: "import-streams" });
+  function renderStreamList() {
+    // preserve which streams were already ticked across re-renders (creating a
+    // new stream rebuilds the list, and we don't want to drop prior choices)
+    const wasChecked = new Set([...checks.entries()].filter(([, cb]) => cb.checked).map(([id]) => id));
+    checks.clear();
+    streamList.replaceChildren();
+    if (!S.streams.length) {
+      streamList.append(el("p", { class: "import-empty muted" }, "No streams yet — create one below."));
+      return;
+    }
+    for (const s of S.streams) {
+      const cb = el("input", { type: "checkbox" });
+      if (wasChecked.has(s.id)) cb.checked = true;
+      checks.set(s.id, cb);
+      streamList.append(el("label", { class: "import-stream" }, cb,
+        el("span", { class: "is-name" }, s.name),
+        el("span", { class: "is-sub" }, s.query ? "“" + s.query.slice(0, 32) + "”" : "empty")));
+    }
+  }
+  renderStreamList();
+
+  const newInput = el("input", { class: "import-newinput", type: "text", placeholder: "New stream name…" });
+  const newBtn = el("button", { class: "ghost", type: "button" }, "＋ Create");
+  newBtn.addEventListener("click", async () => {
+    const name = newInput.value.trim(); if (!name) return;
+    try {
+      const s = await db.createStream(name);
+      S.streams.unshift(s);
+      renderStreamList();
+      checks.get(s.id).checked = true; // pre-check the stream you just made
+      newInput.value = "";
+      renderSidebar();
+    } catch (e) { toast("Could not create stream: " + e.message); }
+  });
+  newInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); newBtn.click(); } });
+
+  const status = el("span", { class: "import-status muted" });
+  const addBtn = el("button", { class: "primary", type: "button" }, "Add to selected");
+  addBtn.addEventListener("click", async () => {
+    const targets = S.streams.filter((s) => checks.get(s.id)?.checked).map((s) => s.id);
+    if (!targets.length) { toast("Pick at least one stream"); return; }
+    addBtn.disabled = true; newBtn.disabled = true; status.textContent = "Adding…";
+    let added = 0, dup = 0;
+    try {
+      // embed each paper once, reused across every target stream
+      const embOf = new Map();
+      for (const p of papers) {
+        let emb = null;
+        if (p.title) { try { emb = await engine.embedDocB64(p.title); } catch {} }
+        embOf.set(p, emb);
+      }
+      for (const sid of targets) {
+        const existing = await db.listExternals(sid);
+        const dois = new Set(existing.filter((e) => e.doi).map((e) => e.doi.toLowerCase()));
+        const titles = new Set(existing.map((e) => normTitle(e.title)));
+        for (const p of papers) {
+          const isDup = (p.doi && dois.has(p.doi.toLowerCase())) || titles.has(normTitle(p.title));
+          if (isDup) { dup++; continue; }
+          await db.addExternal(sid, {
+            col: p.col || "journal", title: p.title, authors: p.authors || [], year: p.year,
+            venue: p.venue, doi: p.doi, url: p.url, abstract: null, keywords: [],
+            emb: embOf.get(p), provenance: { source: "reference-viewer" },
+          });
+          if (p.doi) dois.add(p.doi.toLowerCase());
+          titles.add(normTitle(p.title));
+          added++;
+        }
+      }
+      if (S.current && targets.includes(S.current.id)) await selectStream(S.current.id);
+      const parts = [`Added ${added} paper${added === 1 ? "" : "s"} to ${targets.length} stream${targets.length === 1 ? "" : "s"}`];
+      if (dup) parts.push(`${dup} duplicate${dup === 1 ? "" : "s"} skipped`);
+      toast(parts.join(" · "));
+      close();
+    } catch (e) {
+      status.textContent = ""; addBtn.disabled = false; newBtn.disabled = false;
+      toast("Add failed: " + e.message);
+    }
+  });
+
+  const paperList = el("div", { class: "import-papers" },
+    ...papers.map((p) => el("div", { class: "import-paper" },
+      el("span", { class: "ip-title" }, p.title),
+      el("span", { class: "ip-meta muted" }, [venueLabel(p.venue), p.year].filter(Boolean).join(" · ")))));
+
+  const card = el("div", { class: "import-card", role: "dialog", "aria-modal": "true", "aria-label": "Add papers from Reference Viewer" },
+    el("button", { class: "import-close", type: "button", "aria-label": "Close", onclick: () => close() }, "✕"),
+    el("h2", {}, `Add ${n} paper${n === 1 ? "" : "s"} from Reference Viewer`),
+    el("p", { class: "import-lead muted" }, "Pick the stream(s) to add them to — a paper can go to several at once."),
+    paperList,
+    el("div", { class: "import-section-label" }, "Add to streams"),
+    streamList,
+    el("div", { class: "import-newrow" }, newInput, newBtn),
+    el("div", { class: "import-actions" },
+      el("button", { class: "ghost", type: "button", onclick: () => close() }, "Cancel"),
+      el("span", { class: "spacer-fill" }), status, addBtn));
+
+  const overlay = el("div", { class: "import-overlay" }, card);
+  function onKey(e) { if (e.key === "Escape") close(); }
+  function close() { overlay.remove(); document.removeEventListener("keydown", onKey); }
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", onKey);
+  document.body.append(overlay);
+  requestAnimationFrame(() => overlay.classList.add("open"));
 }
 
 const cite = (r) => copyCite(r, toast);

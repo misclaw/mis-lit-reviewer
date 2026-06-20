@@ -15,6 +15,12 @@ conferences, and preprints — in **one unified view**:
   and new tabs**. Hide any of the three type-columns (the layout collapses to
   2- or 1-column) and bring them back from "Columns ▾". The query-stream sidebar
   folds away to widen the board.
+- **From Reference Viewer** — papers discovered in
+  [reference-viewer](https://reference-viewer.misclaw.app) can be handed off here
+  (it opens the app with the selection in the URL fragment, `#add=…`). A modal
+  then lets you drop them into one or more **streams** at once — they land as
+  attached *external* papers (deduped, embedded for search), exactly like the
+  "+ Add paper" flow. Decoder: `src/handoff.js`.
 - **Workbench** — open a **query stream** and every search you run **auto-saves**
   as that stream's snapshot and lands in its **⟲ History**, so you can roll back
   to any earlier query with one click. Pin papers, attach your own sources, keep

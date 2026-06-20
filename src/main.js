@@ -119,6 +119,7 @@ const HELP_HTML = `
       <li><strong>Streams</strong> — click <strong>+ New query stream</strong> to open a saved line of inquiry. Every search you run auto-saves as that stream's snapshot and lands in its <strong>⟲ History</strong> — click any earlier query to roll back to it.</li>
       <li><strong>Pin &amp; collect</strong> — pin (☆) the papers worth keeping; they gather under <strong>★ Pinned papers</strong> across all of your streams.</li>
       <li><strong>Add &amp; export</strong> — paste a DOI, arXiv id, or BibTeX to attach a paper to a stream, then export the whole stream as <strong>.bib</strong>.</li>
+      <li><strong>From Reference Viewer</strong> — found a cited paper in <a href="https://reference-viewer.misclaw.app" target="_blank" rel="noopener">Reference Viewer</a>? Send your selection here and pick which stream(s) to drop it into — one paper can join several at once.</li>
     </ol>
     <p class="help-foot">Everything lives in this browser — nothing is uploaded. Use <strong>Export / Import JSON</strong> in the header to back up or move between devices.</p>
   </div>`;
