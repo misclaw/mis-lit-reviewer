@@ -15,13 +15,27 @@ const controls = document.getElementById("data-controls");
 const FLASK_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.75h6M10 3v6.4L4.8 18.3A1.5 1.5 0 0 0 6.1 20.6h11.8a1.5 1.5 0 0 0 1.3-2.3L14 9.4V3"/><path d="M7.6 14h8.8"/></svg>';
 
 // ---- theme toggle: no data-theme attribute means "follow the system";
-// clicking pins an explicit choice (read before paint in index.html) ----
+// clicking pins an explicit choice. The pin is written to a cookie on
+// .misclaw.app so the light/dark choice stays in sync across every
+// *.misclaw.app site (localStorage is the same-origin fallback). The pre-paint
+// reader in index.html applies it. ----
+function setTheme(next) {
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch {}
+  try {
+    let c = "mc-theme=" + next + ";path=/;max-age=31536000;samesite=lax";
+    if (location.hostname === "misclaw.app" || location.hostname.endsWith(".misclaw.app")) {
+      c += ";domain=.misclaw.app";
+    }
+    if (location.protocol === "https:") c += ";secure";
+    document.cookie = c;
+  } catch {}
+}
+
 document.getElementById("theme-toggle").addEventListener("click", () => {
   const current = document.documentElement.dataset.theme
     || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-  const next = current === "dark" ? "light" : "dark";
-  document.documentElement.dataset.theme = next;
-  try { localStorage.setItem("theme", next); } catch {}
+  setTheme(current === "dark" ? "light" : "dark");
 });
 
 function mountDataControls() {
