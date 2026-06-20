@@ -17,6 +17,20 @@
       } catch (e) {}
     })();
   </script>
+  <!-- Google Analytics (GA4) — production *.misclaw.app only -->
+  <script>
+    (function () {
+      var h = location.hostname;
+      if (h !== "misclaw.app" && !h.endsWith(".misclaw.app")) return;
+      var id = "G-RS1NQQW0VS";
+      var s = document.createElement("script"); s.async = true;
+      s.src = "https://www.googletagmanager.com/gtag/js?id=" + id;
+      document.head.appendChild(s);
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){ dataLayer.push(arguments); } window.gtag = gtag;
+      gtag("js", new Date()); gtag("config", id);
+    })();
+  </script>
 </head>
 <body>
   <header id="topnav">
