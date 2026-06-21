@@ -28,6 +28,14 @@ conferences, and preprints — in **one unified view**:
   isn't pinned in query B), and a separate **★ Pinned papers** view collects
   everything you've pinned across all queries, tagged by source query. All stored
   locally (localStorage), with Export / Import JSON backup.
+- **Attach a local PDF** — every paper card has a **📎 PDF** button that links a
+  PDF stored on your own machine; once attached, **📄 PDF** opens it in a new
+  browser tab. Where the File System Access API is available (Chromium) the file
+  stays at its path on disk and is read live — so the click is a real
+  "does it still exist?" check (it warns you if the file was moved/deleted);
+  elsewhere (Firefox/Safari) the bytes are copied into the browser. Attachments
+  live in IndexedDB keyed by paper id, are **device-local by design**, and are
+  deliberately **not** part of the Export / Import JSON backup. See `src/pdfs.js`.
 - **Guidance** — a **Guide** in the header explains the IS-focused workflow, and a
   **🧪 Scholar Labs** link points to Google Scholar Labs for broad, cross-discipline
   reviews this corpus deliberately doesn't try to cover.

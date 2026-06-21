@@ -12,6 +12,7 @@
 // 1-column); the choice persists.
 import * as engine from "./search.js";
 import * as db from "./store.js";
+import * as pdfs from "./pdfs.js";
 import * as ingest from "./ingest.js";
 import { bibtex, cite as copyCite } from "./cite.js";
 import { el, toast, debounce } from "./dom.js";
@@ -699,6 +700,7 @@ function pinnedCard(p, pin) {
   for (const s of pin.sources) tags.append(el("button", { class: "pin-tag", title: "Open this query", onclick: () => selectStream(s.id) }, s.name));
   const acts = el("div", { class: "acts" },
     el("button", { class: "ghost", onclick: () => cite(p) }, "❝ cite"),
+    pdfSlot(p),
     el("span", { class: "spacer" }),
     el("button", { class: "ghost", onclick: () => removeFromLibrary(pin) }, "remove from library"));
   c.append(tags, acts);
@@ -741,10 +743,84 @@ function card(r, col) {
   const acts = el("div", { class: "acts" });
   if (!r.external && !r.fresh) acts.append(el("button", { class: "ghost", onclick: () => togglePin(r, col) }, r.pinned ? "★ unpin" : "☆ pin"));
   acts.append(el("button", { class: "ghost", onclick: () => cite(r) }, "❝ cite"));
+  acts.append(pdfSlot(r));
   acts.append(el("span", { class: "spacer" }));
   if (r.external) acts.append(el("button", { class: "ghost", onclick: () => removeExternal(r) }, "remove"));
   c.append(acts);
   return c;
+}
+
+// ---- local PDF attachments (device-local; see src/pdfs.js) ----
+// A self-refreshing slot in a card's action row. When a PDF is attached it
+// offers a button that opens it in a new tab ("the PDF tab"); otherwise it
+// offers an "attach" button. Keyed by paper id, so the same paper shows its
+// attachment in every column / stream / pinned view.
+function pdfSlot(paper) {
+  const slot = el("span", { class: "pdf-slot" });
+  const refresh = async () => {
+    let rec = null;
+    try { rec = await pdfs.getRecord(paper.id); } catch {}
+    slot.replaceChildren();
+    if (rec) {
+      slot.append(
+        el("button", { class: "ghost pdf-open", title: "Open the attached PDF (" + rec.name + ")", onclick: () => openPdf(paper) }, "📄 PDF"),
+        el("button", { class: "ghost pdf-x", title: "Detach “" + rec.name + "”", "aria-label": "Detach PDF", onclick: () => detachPdf(paper, refresh) }, "✕"),
+      );
+    } else {
+      slot.append(el("button", { class: "ghost pdf-attach", title: "Attach a local PDF to this paper", onclick: () => attachPdf(paper, refresh) }, "📎 PDF"));
+    }
+  };
+  refresh();
+  return slot;
+}
+
+let pdfFileInput; // lazily-created hidden input for the non-Chromium fallback
+function pickFileFallback(onPick) {
+  if (!pdfFileInput) {
+    pdfFileInput = el("input", { type: "file", accept: "application/pdf,.pdf", hidden: true });
+    document.body.append(pdfFileInput);
+  }
+  pdfFileInput.onchange = () => {
+    const f = pdfFileInput.files?.[0];
+    pdfFileInput.value = "";
+    if (f) onPick(f);
+  };
+  pdfFileInput.click();
+}
+
+async function attachPdf(paper, refresh) {
+  try {
+    if (pdfs.canPickFile()) {
+      const name = await pdfs.attachViaPicker(paper.id);
+      if (name) { toast("Attached " + name); refresh(); }
+    } else {
+      pickFileFallback(async (file) => {
+        try { await pdfs.attachBlob(paper.id, file); toast("Attached " + file.name); refresh(); }
+        catch (e) { toast("Attach failed: " + e.message); }
+      });
+    }
+  } catch (e) {
+    toast("Attach failed: " + (e?.message || e));
+  }
+}
+
+async function openPdf(paper) {
+  // Reserve the tab synchronously inside the click so the popup blocker lets it
+  // through; resolveFile() may then prompt for permission / read the file.
+  const win = window.open("", "_blank");
+  try {
+    await pdfs.openInto(paper.id, win);
+  } catch (e) {
+    if (win) win.close();
+    if (e?.name === "NotFoundError") toast("PDF not found — it may have been moved or deleted. Re-attach it.");
+    else if (e?.name === "AbortError") toast("Permission needed to open the PDF.");
+    else toast("Couldn’t open PDF: " + (e?.message || e));
+  }
+}
+
+async function detachPdf(paper, refresh) {
+  try { await pdfs.remove(paper.id); toast("PDF detached"); refresh(); }
+  catch (e) { toast("Detach failed: " + (e?.message || e)); }
 }
 
 async function togglePin(r, col) {
