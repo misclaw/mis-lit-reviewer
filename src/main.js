@@ -220,19 +220,35 @@ function render() {
 }
 
 // ---- boot ----
-// inbound handoff (#import= from the extension, #add= from reference-viewer)
-(function receiveHandoff() {
+// Inbound handoff (#import= from the extension, #add= from reference-viewer).
+// The extension reuses one named app tab, so later sends arrive as pure hash
+// changes on an already-running app — receive those live, without a reload.
+function receiveHandoff({ rerender = false } = {}) {
   const rec = parseInbound(location.hash);
   if (!rec) return;
   history.replaceState(null, "", location.pathname + location.search);
   const row = store.addSession(rec);
   toast(`Received ${row.papers.length} papers from ${row.tool} — see Outside IS → Import`);
   if (app.screen === "app") {
-    // land the user on the import tab
     const s = currentStream();
-    runFor(s.id).outsideTab = "ext";
+    runFor(s.id).outsideTab = "ext"; // land the user on the import tab
+    if (rerender) {
+      app.mode = "main";
+      render();
+      document.querySelector(".zone-os")?.scrollIntoView({ behavior: "smooth" });
+    }
   }
-})();
+}
+receiveHandoff();
+window.addEventListener("hashchange", () => receiveHandoff({ rerender: true }));
+
+// Another app tab changed the store (captured session, finished review, edited
+// prefs) — refresh this one. Skipped mid-onboarding / with the preferences
+// modal open so in-progress edits aren't clobbered; the store cache is already
+// invalidated, so the next render picks the changes up regardless.
+store.onExternalChange(() => {
+  if (app.screen === "app" && !app.prefsOpen) render();
+});
 
 fetch((import.meta.env.BASE_URL || "./") + "data/status.json")
   .then((r) => (r.ok ? r.json() : null))

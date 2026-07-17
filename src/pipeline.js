@@ -173,28 +173,50 @@ export async function searchOutside({ query, profile, prefs, provider, key, mode
 }
 
 // ---- metadata enrichment for outside/imported papers (OpenAlex title match).
-// Best-effort: fills citation counts + DOI/URL; failures are silently skipped. ----
+// On a confident match, OpenAlex's canonical metadata wins over whatever the
+// source page showed (Scholar bylines truncate venues and authors). Fetches
+// the abstract too so imported papers can be LLM-summarized like within-IS
+// results. Best-effort: failures leave the paper as it came. ----
 const MAILTO = "gwonedgar@gmail.com";
-export async function enrichOutside(papers, { concurrency = 4, timeoutMs = 8000 } = {}) {
+
+export function reconstructAbstract(inv) {
+  if (!inv) return null;
+  const pos = [];
+  for (const [w, idxs] of Object.entries(inv)) for (const i of idxs) pos.push([i, w]);
+  pos.sort((a, b) => a[0] - b[0]);
+  return pos.length ? pos.map((p) => p[1]).join(" ") : null;
+}
+
+const OA_SELECT = "id,title,doi,cited_by_count,publication_year,primary_location,authorships,abstract_inverted_index";
+
+export async function enrichOutside(papers, { concurrency = 4, timeoutMs = 9000 } = {}) {
   const enrichOne = async (p) => {
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), timeoutMs);
       const q = p.doi
-        ? `https://api.openalex.org/works/doi:${encodeURIComponent(p.doi)}?select=id,doi,cited_by_count,publication_year&mailto=${MAILTO}`
-        : `https://api.openalex.org/works?search=${encodeURIComponent(p.title)}&per-page=1&select=id,title,doi,cited_by_count,publication_year&mailto=${MAILTO}`;
+        ? `https://api.openalex.org/works/doi:${encodeURIComponent(p.doi)}?select=${OA_SELECT}&mailto=${MAILTO}`
+        : `https://api.openalex.org/works?search=${encodeURIComponent(p.title)}&per-page=1&select=${OA_SELECT}&mailto=${MAILTO}`;
       const res = await fetch(q, { signal: ctrl.signal });
       clearTimeout(t);
       if (!res.ok) return p;
       const j = await res.json();
       const w = p.doi ? j : j.results?.[0];
       if (!w || (!p.doi && !titleClose(p.title, w.title))) return p;
+      const authors = (w.authorships || []).slice(0, 8).map((a) => a.author?.display_name).filter(Boolean);
+      const venue = w.primary_location?.source?.display_name;
+      const doi = w.doi ? w.doi.replace(/^https?:\/\/doi\.org\//, "") : null;
       return {
         ...p,
+        title: w.title || p.title,
+        authors: authors.length ? authors.join(", ") : p.authors,
+        venue: venue || p.venue,
         openalex: w.id?.replace("https://openalex.org/", "") || null,
         cited: w.cited_by_count ?? p.cited,
-        doi: p.doi || (w.doi ? w.doi.replace(/^https?:\/\/doi\.org\//, "") : null),
-        year: p.year || w.publication_year || null,
+        doi: p.doi || doi,
+        url: p.url || (doi ? "https://doi.org/" + doi : null),
+        year: w.publication_year || p.year || null,
+        abstract: clip(reconstructAbstract(w.abstract_inverted_index), 1200) || p.abstract || null,
       };
     } catch { return p; }
   };
@@ -209,4 +231,36 @@ function titleClose(a, b) {
   const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/\s+/g, " ").trim();
   const na = norm(a), nb = norm(b);
   return na && nb && (na === nb || na.includes(nb) || nb.includes(na));
+}
+
+// ---- LLM pass over imported papers: one-line summary + relevance rationale,
+// so imports get the same card format as within-IS results. ----
+export async function describeImports({ papers, query, profile, prefs, provider, key, model }) {
+  const listing = papers.map((p, i) =>
+    `[${i}] ${p.title} — ${p.authors || "?"} · ${p.venue || "?"} · ${p.year || "?"}\n` +
+    clip(p.abstract || p.rationale || "", 500)
+  ).join("\n\n");
+  const out = await chatJSON(provider, key, {
+    model,
+    maxTokens: 4000,
+    system:
+      "An Information Systems scholar imported these papers from an external literature tool into their review. " +
+      "For each paper, write a one-line summary of the paper itself and one sentence on why it matters for the " +
+      "research question (its discipline lens, construct, or finding). Also name the paper's home discipline. " +
+      "Reply with JSON only: {\"items\": [{\"i\": <index>, \"summary\": str, \"rationale\": str, \"discipline\": str}]} " +
+      "— one item per paper, same indices.",
+    user: `${profileBlurb(profile, prefs)}\n\nResearch question: ${query}\n\nImported papers:\n\n${listing}`,
+  });
+  const items = Array.isArray(out.items) ? out.items : [];
+  const byIdx = new Map(items.map((x) => [Number(x.i), x]));
+  return papers.map((p, i) => {
+    const x = byIdx.get(i);
+    if (!x) return p;
+    return {
+      ...p,
+      summary: typeof x.summary === "string" && x.summary ? x.summary : p.summary,
+      rationale: typeof x.rationale === "string" && x.rationale ? x.rationale : p.rationale,
+      discipline: typeof x.discipline === "string" && x.discipline ? x.discipline : p.discipline,
+    };
+  });
 }

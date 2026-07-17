@@ -7,7 +7,7 @@ import * as store from "./store.js";
 import { PROVIDERS, resolveModel } from "./llm.js";
 import {
   refineQuery, similarityFilter, rerank, prestigeSort, searchOutside, enrichOutside,
-  venueAbbr, venuePub, VENUES, OUTSIDE_PROMPT_DEFAULT,
+  describeImports, venueAbbr, venuePub, VENUES, OUTSIDE_PROMPT_DEFAULT,
 } from "./pipeline.js";
 
 function savePrefs(patch) {
@@ -156,20 +156,57 @@ export function importSession(ctx, session) {
   const fresh = session.papers
     .filter((p) => !have.has(normTitle(p.title)))
     .map((p) => ({ ...p, source: "import", badge: session.tool }));
-  store.updateStream(stream.id, { outside: [...(s.outside || []), ...fresh] });
   store.markImported(session.id, stream.id);
-  toast(`Imported ${fresh.length} paper${fresh.length === 1 ? "" : "s"} from ${session.tool}`);
-  // enrich in the background, then persist
-  enrichOutside(fresh).then((enriched) => {
-    const cur = store.getStream(stream.id);
-    if (!cur) return;
-    const byTitle = new Map(enriched.map((p) => [normTitle(p.title), p]));
-    store.updateStream(stream.id, {
-      outside: (cur.outside || []).map((p) => byTitle.get(normTitle(p.title)) || p),
-    });
+  if (!fresh.length) {
+    toast("All of this session's papers are already in the stream");
     rerender();
-  });
+    return;
+  }
+  store.updateStream(stream.id, { outside: [...(s.outside || []), ...fresh] });
+  toast(`Imported ${fresh.length} paper${fresh.length === 1 ? "" : "s"} from ${session.tool} — fetching metadata…`);
+  processImports(ctx, fresh); // upgrade the raw cards in the background
   rerender();
+}
+
+// Bring imported papers up to the within-IS card format: canonical metadata +
+// abstract from OpenAlex (source-page bylines are unreliable), then an LLM
+// pass for the one-line summary and the "why relevant" rationale.
+async function processImports(ctx, fresh) {
+  const streamId = ctx.stream.id;
+  const enriched = await enrichOutside(fresh);
+  mergeOutside(streamId, fresh, enriched);
+  ctx.rerender();
+
+  const prefs = store.getPrefs();
+  const provider = outsideProviderOf(prefs);
+  const key = prefs.keys[provider];
+  const cur = store.getStream(streamId);
+  if (!cur) return;
+  if (!cur.query) { toast("Metadata added — run a main review to get relevance rationales"); return; }
+  if (!key?.trim()) return;
+  try {
+    const described = await describeImports({
+      papers: enriched, query: cur.query, profile: store.getProfile(),
+      prefs, provider, key, model: zoneModel(prefs, "os"),
+    });
+    mergeOutside(streamId, enriched, described);
+    toast("Imported papers enriched & summarized");
+    ctx.rerender();
+  } catch (e) {
+    console.warn(e);
+    toast("Import summaries unavailable — " + e.message);
+  }
+}
+
+// Replace stream.outside entries in place; keyed by the paper's title BEFORE
+// this processing step, so enrichment retitling still matches.
+function mergeOutside(streamId, before, after) {
+  const cur = store.getStream(streamId);
+  if (!cur) return;
+  const byOld = new Map(after.map((p, i) => [normTitle(before[i].title), p]));
+  store.updateStream(streamId, {
+    outside: (cur.outside || []).map((p) => byOld.get(normTitle(p.title)) || p),
+  });
 }
 
 // ---- rendering ----
@@ -326,9 +363,16 @@ function outsideZone(ctx) {
   const prefs = store.getPrefs();
   const tab = run.outsideTab || "llm";
 
+  const outsideGrid = (list) => h("div", { class: "results-grid" },
+    list.map((p) => paperCard(p, {
+      variant: "os",
+      badge: p.source === "import" ? (p.badge || "Imported") : (p.discipline || "Web search"),
+    })));
+
   let bodyEl;
   if (tab === "ext") {
-    bodyEl = extPanel(ctx);
+    // imports land in the stream's outside collection — show it right here
+    bodyEl = [extPanel(ctx), stream.outside?.length ? outsideGrid(stream.outside) : null];
   } else if (!prefs.outsideEnabled) {
     bodyEl = h("div", { class: "os-note" },
       "General LLM search is disabled in your preferences. Use the browser extension to import results from Google Scholar Labs, Asta, Paper Digest, or SciSpace — or enable it in Preferences.");
@@ -337,11 +381,7 @@ function outsideZone(ctx) {
   } else if (run.outError) {
     bodyEl = stageCard(OUT_STAGES(prefs.outsideProvider || prefs.provider), 0, { os: true, error: "Outside-IS search failed — " + run.outError });
   } else if (stream.outside?.length) {
-    bodyEl = h("div", { class: "results-grid" },
-      stream.outside.map((p) => paperCard(p, {
-        variant: "os",
-        badge: p.source === "import" ? (p.badge || "Imported") : (p.discipline || "Web search"),
-      })));
+    bodyEl = outsideGrid(stream.outside);
   } else {
     bodyEl = h("div", { class: "os-note" },
       "Runs alongside the IS search. Following Webster & Watson, IS reviews must also look ",

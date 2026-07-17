@@ -33,6 +33,20 @@ const EMPTY = () => ({
 
 let cache = null;
 
+// ---- cross-tab consistency ----
+// Another tab (e.g. one the extension opened) may write the store; the
+// `storage` event fires here when that happens. Drop the in-memory cache so
+// the next read is fresh, and tell the app so it can re-render.
+const externalListeners = new Set();
+export function onExternalChange(fn) { externalListeners.add(fn); }
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key !== KEY) return;
+    cache = null;
+    for (const fn of externalListeners) { try { fn(); } catch { /* listener error */ } }
+  });
+}
+
 function load() {
   if (cache) return cache;
   try {

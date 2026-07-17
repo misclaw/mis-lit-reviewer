@@ -7,7 +7,7 @@
 //   forward:  papers CITING the mains  — /works?filter=cites:{id} per main,
 //             count how many mains each citing paper cites
 import { chatJSON } from "./llm.js";
-import { venueAbbr } from "./pipeline.js";
+import { venueAbbr, reconstructAbstract } from "./pipeline.js";
 
 const MAILTO = "gwonedgar@gmail.com";
 const OA = "https://api.openalex.org";
@@ -31,14 +31,6 @@ async function mapLimit(items, limit, fn) {
     }
   }));
   return out;
-}
-
-function reconstructAbstract(inv) {
-  if (!inv) return null;
-  const pos = [];
-  for (const [w, idxs] of Object.entries(inv)) for (const i of idxs) pos.push([i, w]);
-  pos.sort((a, b) => a[0] - b[0]);
-  return pos.length ? pos.map((p) => p[1]).join(" ") : null;
 }
 
 const WORK_FIELDS = "id,title,authorships,publication_year,primary_location,cited_by_count,doi";

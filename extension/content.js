@@ -142,7 +142,11 @@
       papers,
     };
     const target = (dev ? DEV_URL : APP_URL) + "#import=" + b64url(JSON.stringify(payload));
-    window.open(target, "_blank");
+    // Named target: every send reuses ONE Paper Trails tab instead of piling
+    // up new ones. The app listens for hashchange, so an already-open tab
+    // receives the session live; focus() brings it forward.
+    const w = window.open(target, dev ? "paper-trails-dev" : "paper-trails");
+    try { w?.focus(); } catch { /* popup handling differs per browser */ }
   }
 
   // ---------- floating button ----------
