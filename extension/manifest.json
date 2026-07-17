@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Paper Trails Bridge",
+  "version": "0.2.0",
+  "description": "Bridges searches on Google Scholar (Labs), Asta, Paper Digest, and SciSpace into Paper Trails — the Backward · Main · Forward IS literature review workbench.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://scholar.google.com/*",
+        "https://asta.allen.ai/*",
+        "https://www.paperdigest.org/*",
+        "https://paperdigest.org/*",
+        "https://scispace.com/*",
+        "https://typeset.io/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://mis-lit-reviewer.misclaw.app/*",
+        "http://localhost:5173/*"
+      ],
+      "js": ["presence.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

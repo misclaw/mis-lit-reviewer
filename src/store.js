@@ -1,150 +1,168 @@
-// Device-local persistence for streams / external papers / pins, backed by
-// localStorage. Drop-in replacement for the previous remote-DB module: same
-// async function signatures and return shapes, but everything stays in this
-// browser.
-//
-// Shape under the single namespaced key:
-//   { streams: [...], externals: [...], pins: [...] }
-// Rows keep the same field names the old tables used (id, stream_id,
-// paper_id, created_at/updated_at ISO strings, …) so the rest of the app is
-// unchanged.
+// Device-local persistence for the Backward · Main · Forward workbench.
+// Everything lives in localStorage under one namespaced key: the local profile,
+// research preferences (including LLM API keys — they never leave this
+// browser), review streams with their saved results, and sessions captured by
+// the browser extension. Whole-store Export / Import JSON for backup.
 
-const KEY = "mis-lit-reviewer:v1";
+const KEY = "mis-lit-reviewer:v2";
 
-const EMPTY = () => ({ streams: [], externals: [], pins: [] });
+const DEFAULT_PREFS = () => ({
+  topics: [],
+  interests: "",
+  phil: "",
+  methods: [],
+  prims: [],
+  secs: [],
+  confs: [],
+  keys: { anthropic: "", openai: "", gemini: "" },
+  verified: {},           // {anthropic: true, …} — last verify ping succeeded
+  outsideEnabled: true,   // general (outside-IS) search via LLM API
+  provider: "anthropic",  // provider for the within-IS pipeline + citation screening
+  outsideProvider: "",    // provider for the outside-IS search ("" = same as provider)
+  models: { wi: {}, os: {} }, // per-zone, per-provider model choice {wi: {anthropic: "claude-…"}, os: {…}}
+  outsidePrompt: "",      // custom outside-IS system prompt ("" = built-in default)
+});
+
+const EMPTY = () => ({
+  profile: { name: "", email: "" },
+  prefs: DEFAULT_PREFS(),
+  onboarded: false,
+  streams: [],
+  sessions: [], // captured by the extension / handed off from other apps
+});
+
+let cache = null;
 
 function load() {
+  if (cache) return cache;
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return EMPTY();
+    if (!raw) return (cache = EMPTY());
     const d = JSON.parse(raw);
-    return {
+    cache = {
+      ...EMPTY(),
+      ...d,
+      prefs: { ...DEFAULT_PREFS(), ...(d.prefs || {}) },
       streams: Array.isArray(d.streams) ? d.streams : [],
-      externals: Array.isArray(d.externals) ? d.externals : [],
-      pins: Array.isArray(d.pins) ? d.pins : [],
+      sessions: Array.isArray(d.sessions) ? d.sessions : [],
     };
+    cache.prefs.keys = { anthropic: "", openai: "", gemini: "", ...(cache.prefs.keys || {}) };
+    // migrate a flat models map (pre zone-scoping) to {wi, os}
+    const m = cache.prefs.models || {};
+    if (!("wi" in m) || !("os" in m)) {
+      cache.prefs.models = { wi: { ...m }, os: { ...m } };
+    }
+    return cache;
   } catch {
-    return EMPTY();
+    return (cache = EMPTY());
   }
 }
-function save(d) {
-  localStorage.setItem(KEY, JSON.stringify(d));
+function save() {
+  localStorage.setItem(KEY, JSON.stringify(cache));
 }
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
 
-// ---- streams ----
-export async function listStreams() {
+// ---- profile / prefs ----
+export function getProfile() { return { ...load().profile }; }
+export function getPrefs() { return structuredClone(load().prefs); }
+export function isOnboarded() { return !!load().onboarded; }
+export function saveOnboarding(profile, prefs) {
   const d = load();
-  return [...d.streams].sort(
-    (a, b) => (a.position - b.position) || a.created_at.localeCompare(b.created_at)
-  );
+  d.profile = { ...d.profile, ...profile };
+  d.prefs = { ...d.prefs, ...prefs };
+  d.onboarded = true;
+  save();
 }
-export async function createStream(name, query = "", filters = {}) {
+
+// ---- review streams ----
+export function listStreams() {
+  return load().streams.map((s) => ({ ...s }));
+}
+export function getStream(id) {
+  const s = load().streams.find((s) => s.id === id);
+  return s ? structuredClone(s) : null;
+}
+export function createStream(name) {
   const d = load();
   const row = {
-    id: uuid(), name, query, filters,
-    snapshot: [], // frozen result set, auto-rewritten on every search in this stream
-    history: [],  // past queries run in this stream (newest first) for one-click rollback
-    notes: "", position: 0, created_at: now(), updated_at: now(),
+    id: uuid(), name,
+    query: "", refined: null, expansions: [],
+    within: null,   // 20 reranked papers with summary + rationale
+    outside: null,  // outside-IS results (LLM web search and/or imports)
+    backward: null, // {selected:[…], stats:{…}}
+    forward: null,
+    created_at: now(), updated_at: now(),
   };
   d.streams.push(row);
-  save(d);
+  save();
   return { ...row };
 }
-export async function updateStream(id, fields) {
+export function updateStream(id, fields) {
   const d = load();
   const row = d.streams.find((s) => s.id === id);
   if (!row) throw new Error("stream not found");
   Object.assign(row, fields, { updated_at: now() });
-  save(d);
+  save();
   return { ...row };
 }
-export async function deleteStream(id) {
+export function deleteStream(id) {
   const d = load();
   d.streams = d.streams.filter((s) => s.id !== id);
-  // cascade, like the SQL "on delete cascade"
-  d.externals = d.externals.filter((e) => e.stream_id !== id);
-  d.pins = d.pins.filter((p) => p.stream_id !== id);
-  save(d);
+  save();
 }
 
-// ---- external papers ----
-export async function listExternals(streamId) {
-  const d = load();
-  return d.externals
-    .filter((e) => e.stream_id === streamId)
-    .sort((a, b) => b.created_at.localeCompare(a.created_at)); // newest first
+// ---- extension-captured sessions ----
+export function listSessions() {
+  return load().sessions
+    .map((s) => ({ ...s }))
+    .sort((a, b) => b.received_at.localeCompare(a.received_at));
 }
-export async function addExternal(streamId, rec) {
+export function addSession(rec) {
   const d = load();
   const row = {
-    id: uuid(), stream_id: streamId,
-    col: "journal", title: null, authors: [], year: null, venue: null,
-    doi: null, url: null, abstract: null, keywords: [], emb: null, provenance: {},
-    ...rec,
-    created_at: now(),
+    id: uuid(), tool: rec.tool || "Unknown source", query: rec.query || "",
+    papers: Array.isArray(rec.papers) ? rec.papers : [],
+    hasRationales: !!rec.hasRationales,
+    received_at: now(), imported: {},
   };
-  d.externals.push(row);
-  save(d);
+  // dedupe: identical tool+query+count within the last minute (double hash fire)
+  const dup = d.sessions.find((s) =>
+    s.tool === row.tool && s.query === row.query && s.papers.length === row.papers.length &&
+    Math.abs(new Date(s.received_at) - new Date(row.received_at)) < 60_000);
+  if (dup) return { ...dup };
+  d.sessions.unshift(row);
+  d.sessions = d.sessions.slice(0, 50);
+  save();
   return { ...row };
 }
-export async function deleteExternal(id) {
+export function markImported(sessionId, streamId) {
   const d = load();
-  d.externals = d.externals.filter((e) => e.id !== id);
-  save(d);
+  const row = d.sessions.find((s) => s.id === sessionId);
+  if (row) { row.imported = { ...row.imported, [streamId]: true }; save(); }
 }
-
-// ---- pins ----
-export async function listPins(streamId) {
+export function deleteSession(id) {
   const d = load();
-  return d.pins.filter((p) => p.stream_id === streamId);
-}
-export async function addPin(streamId, paperId, col) {
-  const d = load();
-  // upsert on (stream_id, paper_id), like the old onConflict
-  const existing = d.pins.find((p) => p.stream_id === streamId && p.paper_id === paperId);
-  if (existing) existing.col = col;
-  else d.pins.push({ id: uuid(), stream_id: streamId, paper_id: paperId, col, created_at: now() });
-  save(d);
-}
-export async function removePin(streamId, paperId) {
-  const d = load();
-  d.pins = d.pins.filter((p) => !(p.stream_id === streamId && p.paper_id === paperId));
-  save(d);
-}
-// Cross-query library: every paper pinned in ANY saved query, deduped by
-// paper, tagged with the queries it was pinned from. Paper-level, not query-level.
-export async function allPinnedPapers() {
-  const d = load();
-  const nameOf = new Map(d.streams.map((s) => [s.id, s.name]));
-  const byPaper = new Map();
-  for (const p of d.pins) {
-    const e = byPaper.get(p.paper_id) || { paper_id: p.paper_id, col: p.col, sources: [], created_at: p.created_at };
-    if (!e.sources.some((s) => s.id === p.stream_id)) e.sources.push({ id: p.stream_id, name: nameOf.get(p.stream_id) || "(deleted query)" });
-    if (p.created_at < e.created_at) e.created_at = p.created_at;
-    byPaper.set(p.paper_id, e);
-  }
-  return [...byPaper.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
-}
-export async function pinnedCount() {
-  const d = load();
-  return new Set(d.pins.map((p) => p.paper_id)).size;
+  d.sessions = d.sessions.filter((s) => s.id !== id);
+  save();
 }
 
 // ---- export / import (whole store as JSON) ----
 export function exportStore() {
-  return JSON.stringify({ version: 1, exported_at: now(), ...load() }, null, 2);
+  return JSON.stringify({ version: 2, exported_at: now(), ...load() }, null, 2);
 }
 export function importStore(json) {
   const d = JSON.parse(json);
-  if (!d || typeof d !== "object" || !("streams" in d || "externals" in d || "pins" in d))
+  if (!d || typeof d !== "object" || !("streams" in d || "prefs" in d))
     throw new Error("not a valid export file");
-  const next = {
+  cache = {
+    ...EMPTY(),
+    profile: d.profile || EMPTY().profile,
+    prefs: { ...DEFAULT_PREFS(), ...(d.prefs || {}) },
+    onboarded: !!d.onboarded,
     streams: Array.isArray(d.streams) ? d.streams : [],
-    externals: Array.isArray(d.externals) ? d.externals : [],
-    pins: Array.isArray(d.pins) ? d.pins : [],
+    sessions: Array.isArray(d.sessions) ? d.sessions : [],
   };
-  save(next);
-  return next;
+  save();
+  return cache;
 }

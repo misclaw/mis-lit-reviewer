@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MIS Lit Reviewer — IS corpus</title>
+  <title>Paper Trails — IS literature review</title>
+  <meta name="description" content="Paper Trails: a structured literature review workbench for Information Systems scholars, after Webster & Watson (2002) — main review within IS, outside-IS search, and backward/forward citation tracing." />
   <link rel="icon" type="image/png" href="/misclaw.png" />
   <script>
     // Shared misclaw theme: a cookie scoped to .misclaw.app keeps the light/dark
@@ -12,7 +13,7 @@
     (function () {
       try {
         var m = document.cookie.match(/(?:^|;\s*)mc-theme=(light|dark)\b/);
-        var t = m ? m[1] : (localStorage.getItem("theme") || localStorage.getItem("refmap-theme"));
+        var t = m ? m[1] : localStorage.getItem("theme");
         if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
       } catch (e) {}
     })();
@@ -31,30 +32,12 @@
       gtag("js", new Date()); gtag("config", id);
     })();
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 <body>
-  <header id="topnav">
-    <div class="nav-left">
-      <a class="mc-home" href="https://misclaw.app" title="misclaw.app — all projects">
-        <img class="mc-logo mc-logo--light" src="/misclaw.png" alt="" width="26" height="26" />
-        <img class="mc-logo mc-logo--dark" src="/misclaw-dark.png" alt="" width="26" height="26" />
-        <span class="mc-home-name">misclaw<span>.app</span></span>
-      </a>
-      <span class="mc-sep" aria-hidden="true">/</span>
-      <div class="brand">MIS Lit Reviewer <span class="tag">IS corpus</span></div>
-    </div>
-    <nav id="nav-tabs"></nav>
-    <div class="nav-right">
-      <div id="data-controls"></div>
-      <button id="theme-toggle" class="mc-theme" title="Toggle light / dark mode" aria-label="Toggle light or dark mode">
-        <svg class="mc-icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-        <svg class="mc-icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      </button>
-    </div>
-  </header>
-  <main id="main">
-    <p class="boot">Loading…</p>
-  </main>
+  <div id="app"><p class="boot">Loading…</p></div>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

@@ -214,6 +214,32 @@ export async function search(query, filters = {}) {
   return out;
 }
 
+// Whole-corpus top-K for the review pipeline: embed each query phrasing
+// (original + LLM-refined + expansions), score every paper by its
+// best-matching phrasing (MAX pooling, same rationale as queryVariants), and
+// return the top K records with scores. No column bucketing.
+export async function searchTopK(queries, k = 100) {
+  if (!DATA) throw new Error("index not loaded");
+  const phrasings = [...new Set(queries.filter((q) => q && q.trim()))].slice(0, 5);
+  if (!phrasings.length) return [];
+  const qvecs = [];
+  for (const q of phrasings) qvecs.push(await embedText(q));
+  const { dim, count, papers, emb } = DATA;
+  const scored = [];
+  for (let r = 0; r < count; r++) {
+    const base = r * dim;
+    let best = -Infinity;
+    for (const q of qvecs) {
+      let s = 0;
+      for (let i = 0; i < dim; i++) s += q[i] * emb[base + i];
+      if (s > best) best = s;
+    }
+    scored.push([best / 127, r]);
+  }
+  scored.sort((a, b) => b[0] - a[0]);
+  return scored.slice(0, k).map(([s, r]) => ({ ...papers[r], score: Math.max(0, s) }));
+}
+
 // Full corpus array (slim records) for the browse view. Empty until loaded.
 export function allPapers() {
   return DATA ? DATA.papers : [];

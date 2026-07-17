@@ -1,64 +1,77 @@
-# MIS Lit Reviewer
+# Paper Trails — IS literature review workbench
 
-A public workbench over the Information Systems literature corpus — journals,
-conferences, and preprints — in **one unified view**:
+**Paper Trails** (Backward · Main · Forward) is a structured literature-review
+workbench for **Information Systems** scholars, organized around
+Webster & Watson (2002): run a **main review** (within IS +
+outside IS), then **go backward** through what the main papers cite and
+**forward** through what cites them.
 
-- **Browse by default** — with the query box empty, the three columns
-  (Journals / Conferences / Preprints) show the corpus sorted by date added
-  (or publication year / citations). Papers crawled since the last index build
-  appear with a "new" badge.
-- **Search by typing** — a natural-language query re-ranks the same three
-  columns by meaning, running **entirely in your browser**.
-- **Free venue + column control** — venues are **choice chips** (shown by their
-  familiar abbreviations — ISR, MISQ, JAIS, ICIS…); every chip is selected by
-  default, click to exclude, and the selection is **remembered across refreshes
-  and new tabs**. Hide any of the three type-columns (the layout collapses to
-  2- or 1-column) and bring them back from "Columns ▾". The query-stream sidebar
-  folds away to widen the board.
-- **From Reference Viewer** — papers discovered in
-  [reference-viewer](https://reference-viewer.misclaw.app) can be handed off here
-  (it opens the app with the selection in the URL fragment, `#add=…`). A modal
-  then lets you drop them into one or more **streams** at once — they land as
-  attached *external* papers (deduped, embedded for search), exactly like the
-  "+ Add paper" flow. Decoder: `src/handoff.js`.
-- **Workbench** — open a **query stream** and every search you run **auto-saves**
-  as that stream's snapshot and lands in its **⟲ History**, so you can roll back
-  to any earlier query with one click. Pin papers, attach your own sources, keep
-  notes, export `.bib`. Pins are **query-scoped** (a paper pinned in query A
-  isn't pinned in query B), and a separate **★ Pinned papers** view collects
-  everything you've pinned across all queries, tagged by source query. All stored
-  locally (localStorage), with Export / Import JSON backup.
-- **Attach a local PDF** — every paper card has a **📎 PDF** button that links a
-  PDF stored on your own machine; once attached, **📄 PDF** opens it in a new
-  browser tab. Where the File System Access API is available (Chromium) the file
-  stays at its path on disk and is read live — so the click is a real
-  "does it still exist?" check (it warns you if the file was moved/deleted);
-  elsewhere (Firefox/Safari) the bytes are copied into the browser. Attachments
-  live in IndexedDB keyed by paper id, are **device-local by design**, and are
-  deliberately **not** part of the Export / Import JSON backup. See `src/pdfs.js`.
-- **Guidance** — a **Guide** in the header explains the IS-focused workflow, and a
-  **🧪 Scholar Labs** link points to Google Scholar Labs for broad, cross-discipline
-  reviews this corpus deliberately doesn't try to cover.
+Everything runs in the browser against your own LLM API keys — no server, no
+accounts. **We keep your preferences only (locally); your research activity —
+queries, papers viewed, review streams — is never collected.**
 
-🔎 No server and no accounts: query embedding (bge-small via transformers.js)
-and cosine ranking happen client-side over shipped int8 embeddings. The email
-digest subscription lives in its own project,
-[mis-digest](https://github.com/misclaw/mis-digest)
-(**[mis-digest.misclaw.app](https://mis-digest.misclaw.app)**), linked from the
-header.
+## How it works
+
+**Onboarding / preferences** — a local profile (no password, no backend):
+research interests, philosophy, methodologies, and target venues
+(primary / secondary / conferences), plus at least one LLM API key
+(Anthropic / OpenAI / Gemini). Keys live in `localStorage` and are sent only
+to their provider (Anthropic is called with the
+`anthropic-dangerous-direct-browser-access` CORS header; OpenAI and Gemini
+allow browser calls natively). Worried about pasting a key into a website?
+Fair — this repo is the full source: audit it and run it locally.
+
+**Main review — Within IS** (blue zone):
+
+1. *Data preparation* (already done, refreshed by a daily cron): the IS corpus
+   — basket journals, major IS conferences, SSRN preprints — crawled,
+   deduplicated, and embedded (`bge-small`, int8, shipped as static files).
+2. *Query refinement / expansion* — your LLM reduces ambiguity and adds
+   synonym phrasings (JSON contract, soft-fails to the original query).
+3. *Similarity filtering* — client-side embedding search over ~100k abstracts,
+   MAX-pooled over the refined phrasings → top 100.
+4. *LLM reranking with rationales* — top 100 → 20 papers, each with a
+   one-line summary and a "why relevant" rationale, informed by your profile.
+5. *Prestige ranking* (toggle) — re-sorts the 20 by your primary/secondary
+   venue preferences instead of pure relevance.
+
+**Main review — Outside IS** (gold zone): IS is interdisciplinary, so the same
+question is searched in the reference disciplines via your provider's
+**web-search tool** (Anthropic `web_search`, OpenAI Responses `web_search`,
+Gemini `google_search`), then enriched with citation counts/DOIs from OpenAlex.
+Alternatively (or additionally), the **Import from extension** tab receives
+sessions captured on Google Scholar Labs, Asta, Paper Digest, or SciSpace by
+the bundled Chrome extension (`extension/`, load-unpacked), or pasted as JSON.
+
+**Go backward / forward** (◀ ▶ floating arrows or the nav crumbs): the 20 main
+papers' references (backward) or citing papers (forward) are collected from
+**OpenAlex** (the corpus ids are OpenAlex work ids), counted by how many mains
+they link to, metadata-fetched, LLM-screened to ~20 with rationales, and drawn
+as a two-column **citation graph** with edges to the main review set (click a
+paper to highlight its links).
+
+**Review streams** — every research question is a stream (top-left switcher);
+results, graphs, and imports persist per stream in `localStorage`. Export /
+Import JSON from the stream menu.
 
 ## Stack
-- **Frontend:** Vite + vanilla JS (`src/`), deployed to Cloudflare Pages at the
-  domain root.
-- **Search:** `@huggingface/transformers` with `Xenova/bge-small-en-v1.5` (384-dim),
-  over `public/data/emb_int8.bin.part*` (int8) + `public/data/papers.slim.jsonl.gz.part*`.
-  The data files are split into <25 MiB chunks (Cloudflare Pages per-file limit);
-  `public/data/meta.json` lists the chunk manifest and the loader reassembles
-  them at runtime.
-- **Persistence:** browser localStorage (`src/store.js`, key `mis-lit-reviewer:v1`)
-  for streams / external papers / pins, with whole-store Export / Import JSON.
+
+- **Frontend:** Vite + vanilla JS (`src/`), deployed to Cloudflare Pages.
+  - `main.js` shell/routing · `onboard.js` wizard + preferences ·
+    `review.js` main mode · `graph.js` citation graph ·
+    `pipeline.js` within/outside-IS pipeline · `citegraph.js` OpenAlex tracing ·
+    `llm.js` BYO-key provider layer · `search.js` embedding search ·
+    `store.js` localStorage persistence · `handoff.js` fragment receiver.
+- **Search:** `@huggingface/transformers` with `Xenova/bge-small-en-v1.5`
+  (384-dim) over `public/data/emb_int8.bin.part*` +
+  `public/data/papers.slim.jsonl.gz.part*` (chunked ≤ 25 MiB for Pages;
+  manifest in `public/data/meta.json`).
+- **Citations:** OpenAlex (`referenced_works`, `filter=cites:`), CORS-friendly,
+  polite-pool `mailto`.
+- **Extension:** `extension/` — Manifest V3 content script; see its README.
 
 ## Develop
+
 ```bash
 npm install
 npm run dev      # http://localhost:5173
@@ -67,8 +80,8 @@ npm run dev      # http://localhost:5173
 ## Data pipeline (`data-gen/`)
 
 **Index refresh** — run when the corpus has grown enough to be worth
-re-shipping (the daily `recent.json` overlay covers the gap between
-refreshes):
+re-shipping (the daily `recent.json` overlay is currently *not* surfaced in
+the review UI; the shipped index is the searchable set):
 
 ```bash
 # 1. reassemble the embeddings file from its shipped parts (resume point)
@@ -81,10 +94,6 @@ node data-gen/embed.mjs
 python3 data-gen/ship_chunks.py
 ```
 
-`data-gen/augment_slim.py` was a one-shot that joined `added` (corpus-entry
-date) and `cited` (citation count) onto every pre-existing slim record; new
-records get those fields from `append_slim.py` directly.
-
 Never reorder or edit existing lines of `papers.slim.jsonl` — embedding row N
 must stay aligned with record line N. Appending is safe; anything else means
 `node data-gen/embed.mjs --force` (full re-embed).
@@ -92,25 +101,18 @@ must stay aligned with record line N. Appending is safe; anything else means
 ## Daily updates
 
 `~/research/is-crawler/daily.sh` (launchd, 09:00 KST) crawls, emails the
-digest, then runs `site_export.py`, which commits + pushes two files here:
+digest, then runs `site_export.py`, which commits + pushes
+`public/data/status.json` (drives the corpus-stats card) and
+`public/data/recent.json`. Push-to-deploy makes the page current ~1 minute
+later. Embeddings refresh on the manual cadence above.
 
-- `public/data/status.json` — drives the muted "updated daily" status line
-- `public/data/recent.json` — last ~35 days of crawled papers; the columns
-  overlay whatever isn't in the shipped index yet (badge: "new")
+The email digest lives in its own project,
+[mis-digest](https://github.com/misclaw/mis-digest)
+(`mis-digest.misclaw.app`).
 
-Push-to-deploy makes the page current ~1 minute later. No index rebuild
-happens daily — embeddings refresh on the manual cadence above.
+## Cross-app handoff
 
-## Email digest subscription
-
-The subscription form + double-opt-in backend now live in a separate project,
-[**mis-digest**](https://github.com/misclaw/mis-digest)
-(`mis-digest.misclaw.app`). This site only links to it (header → "✉ Daily
-digest"). The daily broadcast is sent by `digest.py` (`provider = "resend"`,
-crawler side) to the same Resend segment, unchanged by the move.
-
-## Scope
-Only papers **with abstracts** are searchable. Preprint coverage is sparse by
-design and meant to be topped up per-query via your own added sources
-(DOI / arXiv / Zotero), whose metadata is fetched from OpenAlex/Crossref or
-parsed from your paste — never generated.
+Other apps (reference-viewer, the extension) hand papers over via the URL
+fragment: `#add=` (reference-viewer contract, unchanged) or `#import=`
+(extension session contract) — both `base64url(utf8(JSON))`, decoded by
+`src/handoff.js` into a captured session in the Import tab.

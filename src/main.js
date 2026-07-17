@@ -1,27 +1,57 @@
-// MIS Lit Reviewer — static entry point. No auth: the app boots straight into
-// the unified workbench (date-sorted corpus browser that becomes a three-column
-// semantic search the moment you type). Streams / pins / notes live in this
-// browser (localStorage); the header offers Export / Import JSON for backup.
+// Backward · Main · Forward — entry point and app shell.
+// Owns: theme, routing (onboarding ↔ app), the top nav (stream switcher,
+// Backward·Main·Forward crumbs, preferences), the floating direction arrows,
+// the inbound fragment receiver, and the render loop. Views live in
+// review.js (main mode) and graph.js (backward/forward modes).
 import "./style.css";
-import { mountApp } from "./app.js";
-import { exportStore, importStore } from "./store.js";
+import { h, toast } from "./ui.js";
+import * as store from "./store.js";
+import { renderOnboard } from "./onboard.js";
+import { renderReview } from "./review.js";
+import { renderGraph, ensureGraph } from "./graph.js";
+import { parseInbound } from "./handoff.js";
 
-const DIGEST_URL = "https://mis-digest.misclaw.app";
-const LABS_URL = "https://scholar.google.com/scholar_labs/search";
-const main = document.getElementById("main");
-const controls = document.getElementById("data-controls");
+const root = document.getElementById("app");
 
-// Erlenmeyer flask — marks the link out to Google Scholar Labs (broad reviews).
-const FLASK_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.75h6M10 3v6.4L4.8 18.3A1.5 1.5 0 0 0 6.1 20.6h11.8a1.5 1.5 0 0 0 1.3-2.3L14 9.4V3"/><path d="M7.6 14h8.8"/></svg>';
+const app = {
+  screen: store.isOnboarded() ? "app" : "onboard",
+  streamId: null,
+  mode: "main", // main | back | fwd
+  streamOpen: false,
+  prefsOpen: false,
+  status: null, // public/data/status.json — corpus stats for the idle card
+  runs: new Map(), // streamId → runtime (non-persisted) pipeline state
+};
 
-// ---- theme toggle: no data-theme attribute means "follow the system";
-// clicking pins an explicit choice. The pin is written to a cookie on
-// .misclaw.app so the light/dark choice stays in sync across every
-// *.misclaw.app site (localStorage is the same-origin fallback). The pre-paint
-// reader in index.html applies it. ----
+function runFor(id) {
+  if (!app.runs.has(id)) {
+    app.runs.set(id, {
+      isRunning: false, isStage: 0, isError: null, refineNote: null,
+      outRunning: false, outStage: 0, outError: null, outsideTab: "llm",
+      graph: { back: { running: false, stage: 0, error: null, sel: null },
+               fwd: { running: false, stage: 0, error: null, sel: null } },
+    });
+  }
+  return app.runs.get(id);
+}
+
+function currentStream() {
+  let streams = store.listStreams();
+  if (!streams.length) {
+    const s = store.createStream("Untitled review stream");
+    app.streamId = s.id;
+    return s;
+  }
+  let s = streams.find((x) => x.id === app.streamId);
+  if (!s) { s = streams[0]; app.streamId = s.id; }
+  return store.getStream(s.id);
+}
+
+// ---- theme (shared mc-theme cookie across *.misclaw.app; pre-paint reader
+// in index.html applies it before first paint) ----
 function setTheme(next) {
   document.documentElement.dataset.theme = next;
-  try { localStorage.setItem("theme", next); } catch {}
+  try { localStorage.setItem("theme", next); } catch { /* private mode */ }
   try {
     let c = "mc-theme=" + next + ";path=/;max-age=31536000;samesite=lax";
     if (location.hostname === "misclaw.app" || location.hostname.endsWith(".misclaw.app")) {
@@ -29,124 +59,184 @@ function setTheme(next) {
     }
     if (location.protocol === "https:") c += ";secure";
     document.cookie = c;
-  } catch {}
+  } catch { /* ignore */ }
 }
-
-document.getElementById("theme-toggle").addEventListener("click", () => {
+function toggleTheme() {
   const current = document.documentElement.dataset.theme
     || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   setTheme(current === "dark" ? "light" : "dark");
-});
-
-function mountDataControls() {
-  const note = document.createElement("span");
-  note.className = "muted";
-  note.textContent = "Data is stored in this browser";
-
-  const exp = document.createElement("button");
-  exp.className = "ghost";
-  exp.textContent = "Export JSON";
-  exp.addEventListener("click", () => {
-    const blob = new Blob([exportStore()], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "mis-lit-reviewer-export.json";
-    document.body.append(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(a.href);
-  });
-
-  const imp = document.createElement("button");
-  imp.className = "ghost";
-  imp.textContent = "Import JSON";
-  const file = document.createElement("input");
-  file.type = "file";
-  file.accept = "application/json,.json";
-  file.hidden = true;
-  file.addEventListener("change", async () => {
-    const f = file.files?.[0];
-    if (!f) return;
-    try {
-      importStore(await f.text());
-      location.reload(); // simplest way to re-render everything from the new store
-    } catch (e) {
-      alert("Import failed: " + e.message);
-    } finally {
-      file.value = "";
-    }
-  });
-  imp.addEventListener("click", () => file.click());
-
-  controls.replaceChildren(note, exp, imp, file);
 }
 
-// ---- header links: daily digest, a guide, and an out-link to Scholar Labs ----
-function mountNav() {
-  const nav = document.getElementById("nav-tabs");
+// ---- actions shared by views ----
+const actions = {
+  goMode(m) {
+    const stream = currentStream();
+    if (m !== "main" && !stream.within?.length) return; // arrows gated on a finished review
+    app.mode = m;
+    app.streamOpen = false;
+    render();
+    if (m === "back" || m === "fwd") ensureGraph(ctx(), m);
+  },
+};
 
-  const guide = Object.assign(document.createElement("button"), {
-    className: "nav-link", type: "button", title: "How to use MIS Lit Reviewer",
-    innerHTML: '<span aria-hidden="true">?</span> Guide',
-  });
-  guide.addEventListener("click", openHelp);
-
-  const digest = Object.assign(document.createElement("a"), {
-    href: DIGEST_URL, className: "nav-link", title: "Subscribe to the daily email digest of new IS papers",
-    innerHTML: '<span aria-hidden="true">✉</span> Daily digest',
-  });
-
-  const labs = Object.assign(document.createElement("a"), {
-    href: LABS_URL, className: "nav-link", target: "_blank", rel: "noopener",
-    title: "Google Scholar Labs — for broad, cross-discipline literature review. This corpus is deliberately IS-focused.",
-    innerHTML: FLASK_ICON + " Scholar Labs",
-  });
-
-  nav.append(guide, digest, labs);
+function ctx() {
+  const stream = currentStream();
+  return { app, stream, run: runFor(stream.id), actions, rerender: render };
 }
 
-// ---- help / guide modal: purpose + a short how-to, opened from the header ----
-const HELP_HTML = `
-  <div class="help-card" role="dialog" aria-modal="true" aria-label="How to use MIS Lit Reviewer">
-    <button class="help-close" type="button" aria-label="Close">✕</button>
-    <h2>How to use MIS Lit Reviewer</h2>
-    <p class="help-lead">A fast semantic search over a curated <strong>Information Systems</strong> corpus — the basket journals, the major IS conferences, and IS preprints. It is built to surface relevant work <em>within the IS discipline</em> quickly and reproducibly.</p>
-    <p class="help-note"><span aria-hidden="true">🧪</span> Doing a broad, cross-discipline review? Reach for <a href="${LABS_URL}" target="_blank" rel="noopener">Google Scholar Labs</a> (the flask in the header) or general tools — this corpus is deliberately IS-focused, which is exactly what makes in-discipline search here so quick.</p>
-    <h3>The basics</h3>
-    <ol class="help-steps">
-      <li><strong>Browse</strong> — leave the search box empty to scan the corpus by date. Narrow it with the <strong>venue chips</strong> (click to include / exclude an outlet — your selection is remembered) and the year filters.</li>
-      <li><strong>Search</strong> — type a research question in plain language and press Enter. Three columns — <strong>Journals · Conferences · Preprints</strong> — rank papers by meaning, not keywords.</li>
-      <li><strong>Streams</strong> — click <strong>+ New query stream</strong> to open a saved line of inquiry. Every search you run auto-saves as that stream's snapshot and lands in its <strong>⟲ History</strong> — click any earlier query to roll back to it.</li>
-      <li><strong>Pin &amp; collect</strong> — pin (☆) the papers worth keeping; they gather under <strong>★ Pinned papers</strong> across all of your streams.</li>
-      <li><strong>Add &amp; export</strong> — paste a DOI, arXiv id, or BibTeX to attach a paper to a stream, then export the whole stream as <strong>.bib</strong>.</li>
-      <li><strong>Attach a local PDF</strong> — on any paper card, <strong>📎 PDF</strong> links a PDF saved on this computer. Once attached, <strong>📄 PDF</strong> opens it in a new browser tab. The file never leaves your machine and the link is device-local (it isn't part of the Export JSON backup); if you move or delete the file, the app tells you it can no longer find it.</li>
-      <li><strong>From Reference Viewer</strong> — found a cited paper in <a href="https://reference-viewer.misclaw.app" target="_blank" rel="noopener">Reference Viewer</a>? Send your selection here and pick which stream(s) to drop it into — one paper can join several at once.</li>
-    </ol>
-    <p class="help-foot">Everything lives in this browser — nothing is uploaded. Use <strong>Export / Import JSON</strong> in the header to back up or move between devices.</p>
-  </div>`;
+// ---- top navigation ----
+const SUN = `<svg class="mc-icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`;
+const MOON = `<svg class="mc-icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
 
-let helpEl = null;
-function openHelp() {
-  if (!helpEl) {
-    helpEl = document.createElement("div");
-    helpEl.className = "help-overlay";
-    helpEl.innerHTML = HELP_HTML;
-    helpEl.addEventListener("click", (e) => { if (e.target === helpEl || e.target.closest(".help-close")) closeHelp(); });
-    document.body.append(helpEl);
+function themeButton() {
+  const b = h("button", { class: "nav-btn mc-theme", title: "Toggle light / dark mode", onclick: toggleTheme });
+  b.innerHTML = SUN + MOON;
+  return b;
+}
+
+function streamMenu(stream) {
+  const streams = store.listStreams();
+  const file = h("input", { type: "file", accept: "application/json,.json", hidden: true,
+    onchange: async (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      try { store.importStore(await f.text()); location.reload(); }
+      catch (err) { toast("Import failed: " + err.message); }
+    } });
+  return h("div", { class: "stream-menu" },
+    h("div", { class: "menu-label" }, "Review streams"),
+    streams.map((s) =>
+      h("div", { class: "row" },
+        h("button", { class: `stream-item${s.id === stream.id ? " on" : ""}`,
+          onclick: () => { app.streamId = s.id; app.streamOpen = false; app.mode = "main"; render(); } },
+          s.name),
+        streams.length > 1 && h("button", { class: "stream-del", title: "Delete stream",
+          onclick: () => {
+            if (!confirm(`Delete review stream “${s.name}”?`)) return;
+            store.deleteStream(s.id);
+            app.runs.delete(s.id);
+            if (app.streamId === s.id) app.streamId = null;
+            render();
+          } }, "✕"))),
+    h("button", { class: "stream-add",
+      onclick: () => {
+        const s = store.createStream("Untitled review stream " + (streams.length + 1));
+        app.streamId = s.id; app.streamOpen = false; app.mode = "main";
+        render();
+      } }, "+ New review stream"),
+    h("button", { class: "stream-add", style: { borderTop: "none", color: "var(--muted)", fontWeight: 400 },
+      onclick: () => {
+        const blob = new Blob([store.exportStore()], { type: "application/json" });
+        const a = h("a", { href: URL.createObjectURL(blob), download: "is-lit-review-export.json" });
+        document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+      } }, "Export data (JSON)"),
+    h("button", { class: "stream-add", style: { borderTop: "none", color: "var(--muted)", fontWeight: 400 },
+      onclick: () => file.click() }, "Import data (JSON)"),
+    file);
+}
+
+function nav(stream) {
+  const ready = !!stream.within?.length;
+  const profile = store.getProfile();
+  const initial = (profile.name || "A")[0].toUpperCase();
+  return h("div", { class: "nav" },
+    h("div", { class: "nav-inner" },
+      h("div", { class: "wordmark" },
+        "Paper Trails ",
+        h("a", { class: "mc", href: "https://misclaw.app", title: "misclaw.app — all projects" }, "misclaw")),
+      h("div", { class: "stream-wrap" },
+        h("button", { class: "stream-btn", onclick: () => { app.streamOpen = !app.streamOpen; render(); } },
+          h("span", { class: "dot" }),
+          h("span", { class: "name" }, stream.name),
+          h("span", { class: "caret" }, "▾")),
+        app.streamOpen && streamMenu(stream)),
+      h("div", { class: "nav-spacer" }),
+      h("div", { class: "crumbs" },
+        [["Backward", "back"], ["Main", "main"], ["Forward", "fwd"]].map(([label, m]) =>
+          h("button", { class: `crumb${app.mode === m ? " on" : ""}`,
+            disabled: m !== "main" && !ready,
+            onclick: () => actions.goMode(m) }, label))),
+      h("div", { class: "nav-spacer" }),
+      h("div", { class: "privacy" }, h("span", { class: "dot" }), "Activity stays private"),
+      h("button", { class: "nav-btn", title: "Preferences",
+        onclick: () => { app.prefsOpen = true; render(); } },
+        `${initial} · Preferences`),
+      themeButton()));
+}
+
+function arrows(stream) {
+  const ready = !!stream.within?.length;
+  const mk = (side, glyph, target, tip) =>
+    h("button", {
+      class: `arrow-btn ${side}${ready ? " enabled" : ""}`,
+      title: ready ? tip : "Run a main review first",
+      onclick: () => { if (ready) actions.goMode(target); },
+    }, glyph);
+  if (app.mode === "main") return [
+    mk("left", "◀", "back", "Go backward — papers cited by the main set"),
+    mk("right", "▶", "fwd", "Go forward — papers citing the main set"),
+  ];
+  return [
+    mk("left", "◀", app.mode === "fwd" ? "main" : "back", app.mode === "fwd" ? "Return to main review" : "Go backward"),
+    mk("right", "▶", app.mode === "back" ? "main" : "fwd", app.mode === "back" ? "Return to main review" : "Go forward"),
+  ];
+}
+
+function prefsModal() {
+  const overlay = h("div", { class: "modal-overlay",
+    onclick: (e) => { if (e.target === overlay) { app.prefsOpen = false; render(); } } });
+  const wrap = h("div", {});
+  overlay.append(wrap);
+  renderOnboard(wrap, {
+    mode: "edit",
+    onDone: () => { app.prefsOpen = false; toast("Preferences saved"); render(); },
+    onCancel: () => { app.prefsOpen = false; render(); },
+  });
+  return overlay;
+}
+
+// ---- render loop ----
+function render() {
+  if (app.screen === "onboard") {
+    root.replaceChildren();
+    renderOnboard(root, {
+      mode: "onboard",
+      onDone: () => {
+        app.screen = "app";
+        if (!store.listStreams().length) store.createStream("Untitled review stream");
+        render();
+      },
+    });
+    return;
   }
-  helpEl.classList.add("open");
-  document.addEventListener("keydown", onHelpKey);
+  const stream = currentStream();
+  const c = ctx();
+  root.replaceChildren(...[
+    nav(stream),
+    ...arrows(stream),
+    app.mode === "main" ? renderReview(c) : renderGraph(c, app.mode),
+    app.prefsOpen ? prefsModal() : null,
+  ].filter(Boolean));
 }
-function closeHelp() {
-  helpEl?.classList.remove("open");
-  document.removeEventListener("keydown", onHelpKey);
-}
-function onHelpKey(e) { if (e.key === "Escape") closeHelp(); }
 
-mountDataControls();
-mountNav();
-main.replaceChildren();
-const view = document.createElement("div");
-view.className = "view active";
-main.append(view);
-mountApp(view);
+// ---- boot ----
+// inbound handoff (#import= from the extension, #add= from reference-viewer)
+(function receiveHandoff() {
+  const rec = parseInbound(location.hash);
+  if (!rec) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  const row = store.addSession(rec);
+  toast(`Received ${row.papers.length} papers from ${row.tool} — see Outside IS → Import`);
+  if (app.screen === "app") {
+    // land the user on the import tab
+    const s = currentStream();
+    runFor(s.id).outsideTab = "ext";
+  }
+})();
+
+fetch((import.meta.env.BASE_URL || "./") + "data/status.json")
+  .then((r) => (r.ok ? r.json() : null))
+  .then((j) => { if (j) { app.status = j; if (app.mode === "main") render(); } })
+  .catch(() => { /* stats card shows placeholders */ });
+
+render();

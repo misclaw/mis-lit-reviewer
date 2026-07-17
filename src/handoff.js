@@ -1,17 +1,12 @@
-// Inbound cross-app handoff: decode papers that reference-viewer encoded into
-// the URL fragment (#add=…) so the app can offer to add them to streams.
-//
-// reference-viewer and this app are separate origins; reference-viewer can't
-// write our localStorage, so it hands the selection over in the URL and we —
-// first-party to our own store — show the stream picker. This module is PURE
-// (no app/DOM deps) so it is unit-testable in isolation.
-//
-// Wire contract (must stay in sync with reference-viewer/handoff.js):
-//   …/#add=<base64url(utf8(JSON))>
-//   JSON = { v:1, src:"reference-viewer",
-//            papers:[ {title, authors:[…], year, venue, doi, url, col} ] }
-
-const COLS = new Set(["journal", "conference", "preprint"]);
+// Inbound cross-app handoff via URL fragment. Two producers:
+//   #import=…  — the Backward·Main·Forward browser extension (extension/):
+//                { v:1, src:"extension", tool, query, hasRationales,
+//                  papers:[{title, authors?, year?, venue?, url?, doi?, snippet?}] }
+//   #add=…     — reference-viewer (legacy contract, kept verbatim):
+//                { v:1, src:"reference-viewer", papers:[{title, authors:[…], year, venue, doi, url, col}] }
+// Both are base64url(utf8(JSON)). Other origins can't write our localStorage,
+// so the payload rides the URL and we — first-party to our own store — turn it
+// into a captured session the Import tab can pull from.
 
 function b64urlDecode(s) {
   let b64 = s.replace(/-/g, "+").replace(/_/g, "/");
@@ -22,35 +17,46 @@ function b64urlDecode(s) {
   return new TextDecoder().decode(bytes);
 }
 
-function sanitize(p) {
+function str(v, max = 500) { return typeof v === "string" ? v.slice(0, max).trim() : ""; }
+
+function sanitizePaper(p) {
   if (!p || typeof p !== "object") return null;
-  const title = typeof p.title === "string" ? p.title.trim() : "";
-  if (!title) return null; // a paper with no title is unusable
+  const title = str(p.title, 400);
+  if (!title) return null;
   return {
     title,
-    authors: Array.isArray(p.authors) ? p.authors.filter((a) => typeof a === "string").slice(0, 12) : [],
+    authors: Array.isArray(p.authors)
+      ? p.authors.filter((a) => typeof a === "string").slice(0, 12).join(", ")
+      : str(p.authors, 300),
     year: Number.isFinite(p.year) ? p.year : (parseInt(p.year, 10) || null),
-    venue: typeof p.venue === "string" ? p.venue : null,
-    doi: typeof p.doi === "string" ? p.doi : null,
-    url: typeof p.url === "string" ? p.url : null,
-    col: COLS.has(p.col) ? p.col : "journal",
+    venue: str(p.venue, 200),
+    doi: str(p.doi, 120) || null,
+    url: str(p.url, 600) || null,
+    summary: "",
+    rationale: str(p.snippet ?? p.rationale, 600),
+    discipline: "",
+    cited: null,
+    source: "import",
   };
 }
 
-/**
- * Parse a location.hash (or any string) for an #add= handoff payload.
- * Returns { papers:[…] } with at least one valid paper, or null.
- */
-export function parseHandoff(hash) {
-  const m = (hash || "").match(/[#&]add=([^&]+)/);
+// Parse a location.hash; returns a session record for store.addSession, or null.
+export function parseInbound(hash) {
+  const m = (hash || "").match(/[#&](import|add)=([^&]+)/);
   if (!m) return null;
   let data;
   try {
-    data = JSON.parse(b64urlDecode(decodeURIComponent(m[1])));
+    data = JSON.parse(b64urlDecode(decodeURIComponent(m[2])));
   } catch {
     return null;
   }
   if (!data || data.v !== 1 || !Array.isArray(data.papers)) return null;
-  const papers = data.papers.map(sanitize).filter(Boolean);
-  return papers.length ? { papers, src: data.src || "unknown" } : null;
+  const papers = data.papers.map(sanitizePaper).filter(Boolean).slice(0, 60);
+  if (!papers.length) return null;
+  return {
+    tool: m[1] === "add" ? "Reference Viewer" : str(data.tool, 80) || "Browser extension",
+    query: str(data.query, 300),
+    papers,
+    hasRationales: !!data.hasRationales || papers.some((p) => p.rationale),
+  };
 }
