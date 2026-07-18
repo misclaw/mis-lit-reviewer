@@ -172,11 +172,18 @@ export async function searchOutside({ query, profile, prefs, provider, key, mode
   return papers;
 }
 
-// ---- metadata enrichment for outside/imported papers (OpenAlex title match).
-// On a confident match, OpenAlex's canonical metadata wins over whatever the
-// source page showed (Scholar bylines truncate venues and authors). Fetches
-// the abstract too so imported papers can be LLM-summarized like within-IS
-// results. Best-effort: failures leave the paper as it came. ----
+// ---- identity resolution for outside/imported papers.
+// Sources vary wildly in what they hand over: a DOI, a publisher URL with the
+// DOI in its path, a Semantic Scholar link, sometimes just a title — SciSpace
+// sends url+doi with no title or authors at all. Resolution order:
+//   1. normalize identifiers (DOI from any spelling or URL, arXiv, S2 id)
+//   2. papers that lack a title or DOI but have an S2 link → Semantic Scholar
+//      Graph API fills title/authors/venue/year + external ids
+//   3. OpenAlex by DOI (authoritative) or title match → canonical metadata,
+//      citation count, abstract (for the LLM summary pass)
+// Best-effort at each step: failures leave the record as it came. ----
+import { normDoi, doiFromUrl, arxivIdFrom, s2IdFrom } from "./dedupe.js";
+
 const MAILTO = "gwonedgar@gmail.com";
 
 export function reconstructAbstract(inv) {
@@ -189,23 +196,60 @@ export function reconstructAbstract(inv) {
 
 const OA_SELECT = "id,title,doi,cited_by_count,publication_year,primary_location,authorships,abstract_inverted_index";
 
-export async function enrichOutside(papers, { concurrency = 4, timeoutMs = 9000 } = {}) {
-  const enrichOne = async (p) => {
+async function fetchTimeout(url, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try { return await fetch(url, { signal: ctrl.signal }); }
+  finally { clearTimeout(t); }
+}
+
+async function s2Lookup(s2id, timeoutMs) {
+  const res = await fetchTimeout(
+    `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(s2id)}` +
+    "?fields=title,year,venue,authors.name,externalIds,citationCount", timeoutMs);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function resolvePapers(papers, { concurrency = 4, timeoutMs = 9000 } = {}) {
+  const resolveOne = async (raw) => {
+    const p = { ...raw };
     try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      // 1 — normalize what we already have
+      p.doi = normDoi(p.doi) || doiFromUrl(p.url) || null;
+      const ax = arxivIdFrom(p.doi || "") || arxivIdFrom(p.url || "");
+      if (!p.doi && ax) p.doi = "10.48550/arxiv." + ax;
+      p.s2id = p.s2id || s2IdFrom(p.url || "");
+
+      // 2 — Semantic Scholar fills the gaps for link-only records
+      if (p.s2id && (!p.title || !p.doi)) {
+        try {
+          const s2 = await s2Lookup(p.s2id, timeoutMs);
+          if (s2) {
+            p.title = p.title || s2.title || "";
+            p.authors = p.authors || (s2.authors || []).map((a) => a.name).join(", ");
+            p.venue = p.venue || s2.venue || "";
+            p.year = p.year || s2.year || null;
+            p.cited = p.cited ?? s2.citationCount ?? null;
+            p.doi = p.doi || normDoi(s2.externalIds?.DOI) ||
+              (s2.externalIds?.ArXiv ? "10.48550/arxiv." + s2.externalIds.ArXiv : null);
+          }
+        } catch { /* keep going with what we have */ }
+      }
+
+      // 3 — OpenAlex canonical record (by DOI, else by title match)
+      if (!p.doi && !p.title) return p; // nothing to resolve with — raw link card
       const q = p.doi
         ? `https://api.openalex.org/works/doi:${encodeURIComponent(p.doi)}?select=${OA_SELECT}&mailto=${MAILTO}`
         : `https://api.openalex.org/works?search=${encodeURIComponent(p.title)}&per-page=1&select=${OA_SELECT}&mailto=${MAILTO}`;
-      const res = await fetch(q, { signal: ctrl.signal });
-      clearTimeout(t);
+      const res = await fetchTimeout(q, timeoutMs);
       if (!res.ok) return p;
       const j = await res.json();
       const w = p.doi ? j : j.results?.[0];
       if (!w || (!p.doi && !titleClose(p.title, w.title))) return p;
       const authors = (w.authorships || []).slice(0, 8).map((a) => a.author?.display_name).filter(Boolean);
       const venue = w.primary_location?.source?.display_name;
-      const doi = w.doi ? w.doi.replace(/^https?:\/\/doi\.org\//, "") : null;
+      const doi = normDoi(w.doi);
       return {
         ...p,
         title: w.title || p.title,
@@ -223,7 +267,7 @@ export async function enrichOutside(papers, { concurrency = 4, timeoutMs = 9000 
   const out = new Array(papers.length);
   let idx = 0;
   await Promise.all(Array.from({ length: Math.min(concurrency, papers.length) }, async () => {
-    while (idx < papers.length) { const i = idx++; out[i] = await enrichOne(papers[i]); }
+    while (idx < papers.length) { const i = idx++; out[i] = await resolveOne(papers[i]); }
   }));
   return out;
 }

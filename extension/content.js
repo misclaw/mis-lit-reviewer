@@ -84,22 +84,35 @@
     return out;
   }
 
-  // Generic fallback: scholarly-looking links anywhere on the page
+  // Generic fallback: scholarly-looking links anywhere on the page.
+  // Links whose anchor text is a plausible title become full records; links
+  // that only carry an identifier (a doi.org href with "[1]" or an icon as
+  // its text — SciSpace does this) are captured as title-less records and the
+  // app's resolution pipeline (Semantic Scholar / OpenAlex) fills them in.
   const SCHOLARLY = /doi\.org|arxiv\.org|semanticscholar\.org|aclanthology|dl\.acm\.org|link\.springer|sciencedirect|onlinelibrary\.wiley|ieee\.org|jstor\.org|pubsonline\.informs|misq\.org|aisel\.aisnet|nature\.com|pnas\.org|tandfonline|sagepub|oup\.com|academic\.oup/i;
+  const doiOf = (url) => {
+    try {
+      const m = decodeURIComponent(new URL(url).pathname).match(/10\.\d{4,9}\/[^\s]+/);
+      return m ? m[0].replace(/[.,;)\]]+$/, "") : null;
+    } catch { return null; }
+  };
   function extractGeneric() {
     const seen = new Set();
     const out = [];
     for (const a of document.querySelectorAll("a[href]")) {
       if (!SCHOLARLY.test(a.href)) continue;
-      const title = clean(a.textContent);
-      if (title.length < 20 || title.length > 300) continue; // not a title-looking anchor
-      if (/^(https?|www\.|doi:|\[)/i.test(title)) continue;
-      const key = title.toLowerCase();
+      const text = clean(a.textContent);
+      const doi = doiOf(a.href);
+      const isTitle = text.length >= 20 && text.length <= 300 && !/^(https?|www\.|doi:|10\.\d|\[)/i.test(text);
+      if (!isTitle && !doi && !/semanticscholar\.org\/paper\//i.test(a.href)) continue;
+      const key = isTitle ? "t:" + text.toLowerCase() : "u:" + (doi || a.href);
       if (seen.has(key)) continue;
       seen.add(key);
       const block = a.closest("li, article, tr, div");
       out.push({
-        title, url: a.href,
+        title: isTitle ? text : "",
+        url: a.href,
+        doi: doi || undefined,
         year: yearOf(block?.textContent?.slice(0, 600)),
         snippet: "",
       });

@@ -350,6 +350,7 @@ input, textarea {
   background: var(--card); border: 1px solid var(--os-border); border-radius: 10px;
   padding: 22px 24px; color: var(--os-sub); max-width: 640px;
 }
+.outside-line { margin-top: 12px; font-size: 13px; color: var(--os-sub); font-weight: 600; }
 
 .ext-card { background: var(--card); border: 1px solid var(--os-border); border-radius: 10px; padding: 20px 24px; }
 .ext-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; flex-wrap: wrap; }

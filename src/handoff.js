@@ -22,7 +22,10 @@ function str(v, max = 500) { return typeof v === "string" ? v.slice(0, max).trim
 function sanitizePaper(p) {
   if (!p || typeof p !== "object") return null;
   const title = str(p.title, 400);
-  if (!title) return null;
+  // Title-less records are fine as long as they carry an identifier — some
+  // tools (SciSpace) only hand over a URL and DOI; the app's resolution
+  // pipeline (S2/OpenAlex) fills in the rest.
+  if (!title && !str(p.doi, 120) && !str(p.url, 600)) return null;
   return {
     title,
     authors: Array.isArray(p.authors)

@@ -6,9 +6,10 @@ import { h, fmtCites, toast } from "./ui.js";
 import * as store from "./store.js";
 import { PROVIDERS, resolveModel } from "./llm.js";
 import {
-  refineQuery, similarityFilter, rerank, prestigeSort, searchOutside, enrichOutside,
+  refineQuery, similarityFilter, rerank, prestigeSort, searchOutside, resolvePapers,
   describeImports, venueAbbr, venuePub, VENUES, OUTSIDE_PROMPT_DEFAULT,
 } from "./pipeline.js";
+import { dedupeInto, dropWithinOverlap, sourcesOf } from "./dedupe.js";
 
 function savePrefs(patch) {
   store.saveOnboarding(store.getProfile(), { ...store.getPrefs(), ...patch });
@@ -127,19 +128,17 @@ export async function runOutside(ctx, query) {
   const profile = store.getProfile();
 
   run.outRunning = true; run.outStage = 1; run.outError = null;
-  store.updateStream(streamId, { outside: null });
+  // a fresh web search replaces the previous LLM findings; imported papers
+  // (any record whose sources go beyond "Web search") stay in the collection
+  const prevOutside = store.getStream(streamId)?.outside || [];
+  const keptImports = prevOutside.filter((p) => sourcesOf(p).some((s) => s !== "Web search"));
+  store.updateStream(streamId, { outside: keptImports, outsideStats: null });
   rerender();
   try {
     const found = await searchOutside(
       { query, profile, prefs, provider, key, model, prompt: prefs.outsidePrompt }, 8);
     run.outStage = 2; rerender();
-    let papers = await enrichOutside(found);
-    // drop overlaps with the within-IS result set (Crossref-style dedupe by title)
-    const s = store.getStream(streamId);
-    const wTitles = new Set((s.within || []).map((p) => normTitle(p.title)));
-    papers = papers.filter((p) => !wTitles.has(normTitle(p.title)));
-    const existing = (s.outside || []).filter((p) => p.source === "import");
-    store.updateStream(streamId, { outside: [...papers, ...existing] });
+    await integrateOutside(ctx, found.map((p) => ({ ...p, sources: ["Web search"] })));
     run.outRunning = false; run.outStage = 0;
   } catch (e) {
     console.error(e);
@@ -147,66 +146,91 @@ export async function runOutside(ctx, query) {
   }
   rerender();
 }
-const normTitle = (t) => (t || "").toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/\s+/g, " ").trim();
 
 export function importSession(ctx, session) {
   const { stream, rerender } = ctx;
-  const s = store.getStream(stream.id);
-  const have = new Set((s.outside || []).map((p) => normTitle(p.title)));
-  const fresh = session.papers
-    .filter((p) => !have.has(normTitle(p.title)))
-    .map((p) => ({ ...p, source: "import", badge: session.tool }));
   store.markImported(session.id, stream.id);
-  if (!fresh.length) {
-    toast("All of this session's papers are already in the stream");
-    rerender();
-    return;
-  }
-  store.updateStream(stream.id, { outside: [...(s.outside || []), ...fresh] });
-  toast(`Imported ${fresh.length} paper${fresh.length === 1 ? "" : "s"} from ${session.tool} — fetching metadata…`);
-  processImports(ctx, fresh); // upgrade the raw cards in the background
+  const papers = session.papers.map((p) => ({ ...p, source: "import", sources: [session.tool] }));
+  toast(`Importing ${papers.length} paper${papers.length === 1 ? "" : "s"} from ${session.tool} — resolving metadata…`);
+  integrateOutside(ctx, papers).then(({ added, merged, overlap }) => {
+    const bits = [`${added} added`];
+    if (merged) bits.push(`${merged} merged with existing`);
+    if (overlap) bits.push(`${overlap} already in the IS set`);
+    toast(`${session.tool}: ${bits.join(", ")}`);
+  });
   rerender();
 }
 
-// Bring imported papers up to the within-IS card format: canonical metadata +
-// abstract from OpenAlex (source-page bylines are unreliable), then an LLM
-// pass for the one-line summary and the "why relevant" rationale.
-async function processImports(ctx, fresh) {
+// THE single entry path into the outside-IS collection, for web-search results
+// and imports alike: resolve identities (S2/OpenAlex — fills title-less
+// records, normalizes DOIs) → drop papers already in the within-IS main set →
+// merge into the stream's collection (richest-field merge, sources unioned) →
+// LLM pass for missing summaries/rationales. Rigorous dedupe lives in
+// dedupe.js; identity keys are DOI, OpenAlex id, arXiv id, S2 id, then title.
+async function integrateOutside(ctx, incoming) {
   const streamId = ctx.stream.id;
-  const enriched = await enrichOutside(fresh);
-  mergeOutside(streamId, fresh, enriched);
-  ctx.rerender();
-
-  const prefs = store.getPrefs();
-  const provider = outsideProviderOf(prefs);
-  const key = prefs.keys[provider];
+  const resolved = await resolvePapers(incoming);
   const cur = store.getStream(streamId);
-  if (!cur) return;
-  if (!cur.query) { toast("Metadata added — run a main review to get relevance rationales"); return; }
-  if (!key?.trim()) return;
-  try {
-    const described = await describeImports({
-      papers: enriched, query: cur.query, profile: store.getProfile(),
-      prefs, provider, key, model: zoneModel(prefs, "os"),
-    });
-    mergeOutside(streamId, enriched, described);
-    toast("Imported papers enriched & summarized");
-    ctx.rerender();
-  } catch (e) {
-    console.warn(e);
-    toast("Import summaries unavailable — " + e.message);
+  if (!cur) return { added: 0, merged: 0, overlap: 0 };
+  const { kept, overlap } = dropWithinOverlap(resolved, cur.within);
+  let { list, merged } = dedupeInto(cur.outside || [], kept);
+
+  // Retry earlier stragglers: records that resisted resolution (e.g. an
+  // S2-only link during a Semantic Scholar rate-limit window) get another
+  // attempt on every integration — and a late resolution can reveal a
+  // duplicate, so re-dedupe afterwards.
+  const unresolved = list.filter((p) => !p.title && (p.doi || p.url || p.s2id));
+  if (unresolved.length) {
+    const re = await resolvePapers(unresolved);
+    const byKey = new Map(re.map((p, i) => [unresolved[i].url || unresolved[i].doi, p]));
+    const replaced = list.map((p) => (!p.title && byKey.get(p.url || p.doi)) || p);
+    const r2 = dedupeInto([], replaced);
+    list = r2.list;
+    merged += r2.merged;
   }
+
+  const prev = cur.outsideStats || { merged: 0, overlap: 0 };
+  store.updateStream(streamId, {
+    outside: list,
+    outsideStats: { merged: prev.merged + merged, overlap: prev.overlap + overlap },
+  });
+  ctx.rerender();
+  describeMissing(ctx, streamId);
+  return { added: kept.length - merged, merged, overlap };
 }
 
-// Replace stream.outside entries in place; keyed by the paper's title BEFORE
-// this processing step, so enrichment retitling still matches.
-function mergeOutside(streamId, before, after) {
+// LLM summaries/rationales for collection entries that still lack them
+// (needs a key — imports themselves work without one).
+let describeBusy = false;
+async function describeMissing(ctx, streamId) {
+  if (describeBusy) return;
+  const prefs = store.getPrefs();
+  const provider = outsideProviderOf(prefs);
+  const key = prefs.keys[provider]?.trim() ? prefs.keys[provider]
+    : prefs.keys[prefs.provider]?.trim() ? prefs.keys[prefs.provider] : null;
   const cur = store.getStream(streamId);
-  if (!cur) return;
-  const byOld = new Map(after.map((p, i) => [normTitle(before[i].title), p]));
-  store.updateStream(streamId, {
-    outside: (cur.outside || []).map((p) => byOld.get(normTitle(p.title)) || p),
-  });
+  if (!key || !cur?.query) return;
+  const missing = (cur.outside || []).filter((p) => p.title && (!p.summary || !p.rationale));
+  if (!missing.length) return;
+  describeBusy = true;
+  try {
+    const described = await describeImports({
+      papers: missing, query: cur.query, profile: store.getProfile(),
+      prefs, provider, key, model: zoneModel(prefs, "os"),
+    });
+    const byTitle = new Map(described.map((p) => [p.title, p]));
+    const now = store.getStream(streamId);
+    if (now) {
+      store.updateStream(streamId, {
+        outside: (now.outside || []).map((p) => byTitle.get(p.title) || p),
+      });
+      ctx.rerender();
+    }
+  } catch (e) {
+    console.warn(e);
+  } finally {
+    describeBusy = false;
+  }
 }
 
 // ---- rendering ----
@@ -231,14 +255,16 @@ export function paperCard(p, { variant, rank = null, badge = null }) {
   const authors = typeof p.authors === "string" ? p.authors : (p.authors || []).join(", ");
   const cites = fmtCites(p.cited);
   const pub = venuePub(p.venue);
+  // a record that resisted resolution may have no title — show its identifier
+  const title = p.title || (p.doi ? "doi:" + p.doi : p.url) || "(unresolved paper)";
   return h("div", { class: `paper-card ${variant}` },
     h("div", { class: "top" },
       rank != null && h("div", { class: "rank" }, "#" + rank),
       h("div", { class: "body" },
         h("div", { class: "p-title" },
           p.url || p.doi
-            ? h("a", { href: p.url || "https://doi.org/" + p.doi, target: "_blank", rel: "noopener" }, p.title)
-            : p.title),
+            ? h("a", { href: p.url || "https://doi.org/" + p.doi, target: "_blank", rel: "noopener" }, title)
+            : title),
         h("div", { class: "p-meta" },
           authors, authors ? " · " : "",
           h("strong", {}, p.venue || "—"),
@@ -363,11 +389,26 @@ function outsideZone(ctx) {
   const prefs = store.getPrefs();
   const tab = run.outsideTab || "llm";
 
-  const outsideGrid = (list) => h("div", { class: "results-grid" },
-    list.map((p) => paperCard(p, {
-      variant: "os",
-      badge: p.source === "import" ? (p.badge || "Imported") : (p.discipline || "Web search"),
-    })));
+  // ONE integrated collection: web-search finds and imports live together,
+  // deduped by identity; each card shows its discipline + where it came from.
+  const outsideGrid = (list) => {
+    const st = stream.outsideStats || {};
+    const imp = list.filter((p) => sourcesOf(p).some((x) => x !== "Web search")).length;
+    const web = list.filter((p) => sourcesOf(p).includes("Web search")).length;
+    const bits = [`${list.length} paper${list.length === 1 ? "" : "s"}`];
+    if (web) bits.push(`${web} from web search`);
+    if (imp) bits.push(`${imp} imported`);
+    if (st.merged) bits.push(`${st.merged} duplicate${st.merged === 1 ? "" : "s"} merged`);
+    if (st.overlap) bits.push(`${st.overlap} already in the IS set`);
+    return [
+      h("div", { class: "outside-line" }, bits.join(" · ")),
+      h("div", { class: "results-grid" },
+        list.map((p) => paperCard(p, {
+          variant: "os",
+          badge: (p.discipline ? p.discipline + " — " : "") + sourcesOf(p).join(" · "),
+        }))),
+    ];
+  };
 
   let bodyEl;
   if (tab === "ext") {

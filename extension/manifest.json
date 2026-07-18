@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Paper Trails Bridge",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Bridges searches on Google Scholar (Labs), Asta, Paper Digest, and SciSpace into Paper Trails — the Backward · Main · Forward IS literature review workbench.",
   "content_scripts": [
     {

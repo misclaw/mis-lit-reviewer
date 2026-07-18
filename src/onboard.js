@@ -95,7 +95,9 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
     return [
       h("div", { class: "onb-h" }, "Connect an LLM provider"),
       h("div", { class: "onb-sub" },
-        "At least one key is required for the pipeline (query refinement, reranking, rationales). Keys are stored in this browser and sent only to their provider."),
+        "The Within-IS pipeline (query refinement, reranking, rationales) needs at least one key. " +
+        "Outside-IS works without any API — the browser extension imports from external tools — " +
+        "though its own web search also needs a key. Keys are stored in this browser and sent only to their provider."),
       Object.keys(PROVIDERS).map((prov) => keyRow(prov)),
       h("button", { class: `outside-toggle${p.outsideEnabled ? " on" : ""}`,
         onclick: () => { p.outsideEnabled = !p.outsideEnabled; render(); } },
