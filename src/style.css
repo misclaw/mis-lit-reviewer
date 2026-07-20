@@ -397,6 +397,7 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 .ext-actions a.btn-import { text-decoration: none; display: inline-block; }
 .ext-steps { font-size: 13px; color: var(--muted); margin: 8px 0 0; padding-left: 20px; }
 .ext-steps li { margin: 3px 0; }
+.ext-note { font-size: 12.5px; color: var(--muted); margin-top: 8px; font-style: italic; }
 .ext-launch { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--os-rowborder); }
 .ext-launch .lab { font-size: 13px; font-weight: 600; color: var(--os-sub); margin-bottom: 8px; }
 .ext-launch-row { display: flex; gap: 8px; flex-wrap: wrap; }

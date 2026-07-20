@@ -1,4 +1,4 @@
-# Paper Trails Bridge (Chrome extension)
+# Paper Trails Bridge (Chrome & Firefox extension)
 
 Bridges searches you run on general literature tools into the
 **Paper Trails** workbench (Backward · Main · Forward) as *outside-IS* imports:
@@ -19,11 +19,30 @@ local-only store. The Import tab there lets you merge it into a review stream.
 **⌥-click (Alt-click)** the button to target `http://localhost:5173` instead
 (local development).
 
-## Install (unpacked)
+## Install — Chrome (unpacked)
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode** (top right)
 3. **Load unpacked** → select this `extension/` folder
+
+(Chrome may warn about the `browser_specific_settings` manifest key — that's
+the Firefox block; it's ignored by Chrome and harmless.)
+
+## Install — Firefox (temporary add-on)
+
+Requires Firefox **140+** (the manifest's `strict_min_version` — the current ESR).
+
+1. Open `about:debugging#/runtime/this-firefox`
+2. **Load Temporary Add-on…** → select this folder's `manifest.json`
+3. If the button doesn't appear on a supported site, open
+   `about:addons` → Paper Trails Bridge → **Permissions** and make sure
+   access to the listed sites is granted (Firefox treats MV3 site access
+   as grantable)
+
+Temporary add-ons are removed when Firefox quits — reload after a restart.
+A permanent install needs the add-on signed by Mozilla (AMO); the manifest
+already carries the required `gecko.id` and data-collection declaration
+(`none`), so the folder can be submitted as-is if we ever want that.
 
 ## Verify
 

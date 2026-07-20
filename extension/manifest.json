@@ -1,8 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Paper Trails Bridge",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Bridges searches on Google Scholar (Labs), Asta, Paper Digest, and SciSpace into Paper Trails — the Backward · Main · Forward IS literature review workbench.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "paper-trails-bridge@misclaw.app",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": { "required": ["none"] }
+    },
+    "gecko_android": { "strict_min_version": "142.0" }
+  },
   "content_scripts": [
     {
       "matches": [

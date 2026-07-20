@@ -536,12 +536,29 @@ function extPanel(ctx) {
   const q = ctx.stream.query || "";
   const paste = h("textarea", { placeholder: '{"v":1,"tool":"…","query":"…","papers":[{"title":"…"}]}' });
 
+  // Firefox loads the same folder as a temporary add-on; Chromium loads it
+  // unpacked. Show the steps for the browser we're actually running in.
+  const isFirefox = /firefox/i.test(navigator.userAgent);
+  const steps = isFirefox
+    ? [
+        "Download the repo (or just its extension/ folder) from GitHub",
+        "Open about:debugging#/runtime/this-firefox",
+        "Click “Load Temporary Add-on…” and select the extension folder's manifest.json",
+        "Reload this page, then click “Verify installation”",
+      ]
+    : [
+        "Download the repo (or just its extension/ folder) from GitHub",
+        "Open chrome://extensions and enable Developer mode (top right)",
+        "Click “Load unpacked” and select the extension/ folder",
+        "Reload this page, then click “Verify installation”",
+      ];
   const setup = detected
     ? h("div", { class: "ext-status ok" }, `✓ Extension detected (v${detected}) — run your question on a tool below and click “Send to Paper Trails” there.`)
     : h("div", { class: "ext-setup" },
         h("div", { class: "ext-status" },
-          "Extension not detected in this browser. It installs manually — download it from GitHub, " +
-          "then load it unpacked (4 quick steps below). After that, results from the tools flow back here with one click."),
+          "Extension not detected in this browser. It works in Chrome and Firefox and installs manually — " +
+          "download it from GitHub, then follow the 4 quick steps below. " +
+          "After that, results from the tools flow back here with one click."),
         h("div", { class: "ext-actions" },
           h("a", { class: "btn-import", href: EXT_REPO_URL, target: "_blank", rel: "noopener" },
             "Get the extension (GitHub) ↗"),
@@ -551,12 +568,11 @@ function extPanel(ctx) {
               else toast("Not detected yet — after loading it, reload this page and verify again");
             } }, "Verify installation")),
         h("details", { class: "ext-paste", open: true },
-          h("summary", {}, "Install steps"),
-          h("ol", { class: "ext-steps" },
-            h("li", {}, "Download the repo (or just its extension/ folder) from GitHub"),
-            h("li", {}, "Open chrome://extensions and enable Developer mode (top right)"),
-            h("li", {}, "Click “Load unpacked” and select the extension/ folder"),
-            h("li", {}, "Reload this page, then click “Verify installation”"))));
+          h("summary", {}, isFirefox ? "Install steps (Firefox)" : "Install steps (Chrome)"),
+          h("ol", { class: "ext-steps" }, steps.map((s) => h("li", {}, s))),
+          isFirefox && h("div", { class: "ext-note" },
+            "Firefox removes temporary add-ons when it quits — reload it after a restart. " +
+            "If the button doesn't show on a tool site, grant site access under about:addons → Permissions.")));
 
   const launcher = h("div", { class: "ext-launch" },
     h("div", { class: "lab" }, q ? "Run your research question on:" : "Open a tool (your question is prefilled once you run a review or web search):"),
