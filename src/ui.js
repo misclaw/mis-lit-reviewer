@@ -22,6 +22,10 @@ function append(el, kids) {
   }
 }
 
+// The macOS shell lives in the repo (build it with macos/build.sh). Linked from
+// the front door and the account modal so the native option is discoverable.
+export const MAC_APP_URL = "https://github.com/misclaw/mis-lit-reviewer/tree/main/macos";
+
 export function fmtCites(n) {
   if (n == null) return null;
   return n.toLocaleString("en-US");

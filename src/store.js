@@ -4,6 +4,8 @@
 // browser), review streams with their saved results, and sessions captured by
 // the browser extension. Whole-store Export / Import JSON for backup.
 
+import { paperKeys } from "./dedupe.js";
+
 const KEY = "mis-lit-reviewer:v2";
 
 const DEFAULT_PREFS = () => ({
@@ -195,6 +197,33 @@ export function deleteStream(id) {
   const d = load();
   d.streams = d.streams.filter((s) => s.id !== id);
   save();
+}
+
+// Patch a single paper (matched by identity) wherever it lives in a stream —
+// within-IS, the outside collection, or a backward/forward selection. Used to
+// HOLD a lazily fetched abstract (and any metadata filled alongside it) so it
+// survives reloads and syncs. Best-effort: returns true iff something changed.
+export function patchPaperInStream(streamId, paper, patch) {
+  const d = load();
+  const row = d.streams.find((s) => s.id === streamId);
+  if (!row) return false;
+  // corpus records carry the OpenAlex id in `.id`; normalize so keys line up
+  const target = new Set(paperKeys({ ...paper, openalex: paper.openalex || paper.id }));
+  if (!target.size) return false;
+  let changed = false;
+  const scan = (list) => {
+    if (!Array.isArray(list)) return;
+    for (const p of list) {
+      const keys = paperKeys({ ...p, openalex: p.openalex || p.id });
+      if (keys.some((k) => target.has(k))) { Object.assign(p, patch); changed = true; }
+    }
+  };
+  scan(row.within);
+  scan(row.outside);
+  scan(row.backward?.selected);
+  scan(row.forward?.selected);
+  if (changed) { row.updated_at = now(); save(); }
+  return changed;
 }
 
 // ---- extension-captured sessions ----

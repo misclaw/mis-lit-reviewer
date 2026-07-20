@@ -11,6 +11,7 @@ import {
   describeImports, venuePub, VENUES, OUTSIDE_PROMPT_DEFAULT,
 } from "./pipeline.js";
 import { dedupeInto, dropWithinOverlap, sourcesOf, recommendersOf, channelsOf } from "./dedupe.js";
+import { openPaperModal } from "./paper-modal.js";
 
 function savePrefs(patch) {
   store.saveOnboarding(store.getProfile(), { ...store.getPrefs(), ...patch });
@@ -438,13 +439,29 @@ function stageCard(stages, current, { os = false, error = null } = {}) {
     error && h("div", { class: "stage-err" }, error));
 }
 
-export function paperCard(p, { variant, rank = null, badge = null, cross = null }) {
+export function paperCard(p, { variant, rank = null, badge = null, cross = null, ctx = null }) {
   const authors = typeof p.authors === "string" ? p.authors : (p.authors || []).join(", ");
   const cites = fmtCites(p.cited);
   const pub = venuePub(p.venue);
   // a record that resisted resolution may have no title — show its identifier
   const title = p.title || (p.doi ? "doi:" + p.doi : p.url) || "(unresolved paper)";
-  return h("div", { class: `paper-card ${variant}${cross ? " cross" : ""}` },
+  // Clicking the card body opens the detail + abstract modal; the title link
+  // (and any other anchor) keeps its own navigation — guarded via closest("a").
+  // A fetched abstract is written back onto the stored paper so it's held.
+  const persist = ctx ? (patch) => {
+    try { store.patchPaperInStream(ctx.stream.id, p, patch); } catch { /* best-effort */ }
+  } : null;
+  const open = () => openPaperModal(p, { accent: variant === "os" ? "os" : "wi", persist });
+  return h("div", {
+    class: `paper-card ${variant}${cross ? " cross" : ""} clickable`,
+    role: "button", tabindex: 0,
+    "aria-label": "Open details & abstract for: " + title,
+    title: "Click for metadata & abstract",
+    onclick: (e) => { if (e.target.closest("a")) return; open(); },
+    onkeydown: (e) => {
+      if ((e.key === "Enter" || e.key === " ") && !e.target.closest("a")) { e.preventDefault(); open(); }
+    },
+  },
     h("div", { class: "top" },
       rank != null && h("div", { class: "rank" }, "#" + rank),
       h("div", { class: "body" },
@@ -465,7 +482,8 @@ export function paperCard(p, { variant, rank = null, badge = null, cross = null 
         p.rationale && h("div", { class: "p-rationale" }, h("strong", {}, "Why relevant: "), p.rationale),
         h("div", { class: "p-foot" },
           cites != null && h("span", {}, `Cited by ${cites}`),
-          badge && h("span", {}, badge)))));
+          badge && h("span", {}, badge),
+          h("span", { class: "p-open-hint" }, "Details & abstract →")))));
 }
 
 function withinZone(ctx) {
@@ -492,7 +510,7 @@ function withinZone(ctx) {
         run.refineNote ? h("span", { style: { color: "var(--danger)" } }, ` · ${run.refineNote}`) : ""),
       h("div", { class: "results-grid" },
         list.map((p, i) => paperCard(p, {
-          variant: "wi", rank: i + 1,
+          variant: "wi", rank: i + 1, ctx,
           badge: prestige ? "Prestige rank" : "Relevance rank",
         }))),
     ];
@@ -628,7 +646,7 @@ function outsideZone(ctx) {
       h("div", { class: "results-grid" },
         ranked.map((p) => {
           const chs = channelsOf(p);
-          return paperCard(p, { variant: "os", badge: badgeFor(p), cross: chs.length > 1 ? chs : null });
+          return paperCard(p, { variant: "os", ctx, badge: badgeFor(p), cross: chs.length > 1 ? chs : null });
         })),
     ];
   };

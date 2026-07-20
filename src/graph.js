@@ -9,7 +9,13 @@ import { collectBackward, collectForward, screenCandidates } from "./citegraph.j
 import { venueAbbr } from "./pipeline.js";
 import { resolveModel } from "./llm.js";
 import { paperCard } from "./review.js";
+import { openPaperModal } from "./paper-modal.js";
 import { exportRow } from "./export.js";
+
+// Hold a fetched abstract on the stored paper (best-effort) for graph cards.
+const detailsPersist = (ctx, p) => (patch) => {
+  try { store.patchPaperInStream(ctx.stream.id, p, patch); } catch { /* best-effort */ }
+};
 
 const PITCH = 160;       // vertical rhythm of the selected-paper column
 const CARD_W = 470;      // both columns
@@ -75,7 +81,7 @@ function stageCard(dir, current, error) {
     error && h("div", { class: "stage-err" }, error));
 }
 
-function gCard(p, { main = false, x, y, hClamp, sel = false, linkNote, onClick }) {
+function gCard(p, { main = false, x, y, hClamp, sel = false, linkNote, onClick, accent = "wi", persist = null }) {
   return h("div", {
     class: `gcard ${main ? "main" : "other"}${sel ? " sel" : ""}`,
     style: { left: x + "px", top: y + "px", height: hClamp + "px" },
@@ -99,7 +105,10 @@ function gCard(p, { main = false, x, y, hClamp, sel = false, linkNote, onClick }
     h("div", { class: "gr" }, p.rationale || p.summary || ""),
     h("div", { class: "gf" },
       h("span", {}, linkNote),
-      fmtCites(p.cited) != null && h("span", {}, `Cited by ${fmtCites(p.cited)}`)));
+      fmtCites(p.cited) != null && h("span", {}, `Cited by ${fmtCites(p.cited)}`),
+      h("button", { class: "gf-details", title: "Metadata & abstract",
+        onclick: (e) => { e.stopPropagation(); openPaperModal(p, { accent, persist }); } },
+        "Abstract")));
 }
 
 function graphBody(ctx, dir, data) {
@@ -151,11 +160,13 @@ function graphBody(ctx, dir, data) {
           svg,
           others.map((p, i) => gCard(p, {
             x: otherX, y: i * PITCH, hClamp: PITCH - 18, sel: sel === i,
+            accent: isBack ? "wi" : "os", persist: detailsPersist(ctx, p),
             linkNote: (isBack ? "Cited by " : "Cites ") + (p.links?.length || 0) + `/${nM} main`,
             onClick: () => { run.graph[dir].sel = sel === i ? null : i; ctx.rerender(); },
           })),
           mains.map((p, i) => gCard(p, {
-            main: true, x: mainX, y: i * mainPitch, hClamp: MAIN_H,
+            main: true, x: mainX, y: i * mainPitch, hClamp: MAIN_H, accent: "wi",
+            persist: detailsPersist(ctx, p),
             linkNote: "Main review #" + (i + 1),
           }))))),
     h("div", { class: "graph-foot" },
@@ -171,7 +182,7 @@ function listBody(ctx, dir, data) {
   const isBack = dir === "back";
   return h("div", { class: "results-grid graph-list" },
     data.selected.map((p, i) => paperCard(p, {
-      variant: isBack ? "wi" : "os", rank: i + 1,
+      variant: isBack ? "wi" : "os", rank: i + 1, ctx,
       badge: (isBack ? "Cited by " : "Cites ") + (p.links?.length || 0) + `/${nM} main papers`,
     })));
 }

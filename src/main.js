@@ -4,7 +4,7 @@
 // the inbound fragment receiver, and the render loop. Views live in
 // review.js (main mode) and graph.js (backward/forward modes).
 import "./style.css";
-import { h, toast } from "./ui.js";
+import { h, toast, MAC_APP_URL } from "./ui.js";
 import * as store from "./store.js";
 import { renderOnboard } from "./onboard.js";
 import { renderReview } from "./review.js";
@@ -315,6 +315,11 @@ function welcomeScreen() {
           h("div", { class: "wc-title" }, "Continue as guest"),
           h("div", { class: "wc-sub" }, "Start right away — your work stays in this browser"),
           h("div", { class: "wc-go" }, "→"))),
+      h("a", { class: "welcome-mac", href: MAC_APP_URL, target: "_blank", rel: "noopener" },
+        h("span", { class: "mac-glyph", "aria-hidden": "true" }, "⌘"),
+        h("span", {},
+          h("strong", {}, "Prefer a native window? Get Paper Trails for Mac"),
+          h("span", { class: "mac-sub" }, "A desktop app that stays signed in and syncs with your browser — build it from the repo ↗"))),
       h("div", { class: "welcome-foot" }, "Open source · bring your own LLM keys · no tracking")));
 }
 

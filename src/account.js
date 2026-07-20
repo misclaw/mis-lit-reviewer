@@ -1,7 +1,7 @@
 // Account & sync UI: the nav status button and the account modal.
 // The button re-labels itself on sync-state changes via direct DOM updates —
 // a full app re-render on every idle↔syncing flip would drop input focus.
-import { h, toast } from "./ui.js";
+import { h, toast, MAC_APP_URL } from "./ui.js";
 import * as sync from "./sync.js";
 
 const ago = (t) => {
@@ -147,6 +147,10 @@ export function accountModal({ onClose, onSignedIn } = {}) {
               "Creating an account emails you a confirmation link — click it, then sign in. " +
               "Keep your password in a password manager (there's no reset yet). " +
               "Sync stores your research data (never keys) in a private row only your account can read."),
+            h("div", { class: "acct-mac" },
+              "Also available as a native ",
+              h("a", { href: MAC_APP_URL, target: "_blank", rel: "noopener" }, "Mac app"),
+              " — the same workbench in a desktop window, kept in sync with this account."),
           ]
         : [
             h("div", { class: "onb-sub" }, "Signed in as ", h("strong", {}, st.user.email)),
