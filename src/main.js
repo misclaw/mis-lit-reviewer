@@ -17,14 +17,14 @@ import { syncNavButton, accountModal, storageNoticeModal } from "./account.js";
 const root = document.getElementById("app");
 
 const app = {
-  screen: store.isOnboarded() ? "app" : "onboard",
+  // welcome (front door: sign in vs guest) → onboard (wizard) → app
+  screen: store.isOnboarded() ? "app" : "welcome",
   streamId: store.getLastStreamId(), // resume where the user left off
   mode: "main", // main | back | fwd
   streamOpen: false,
   prefsOpen: false,
   accountOpen: false,
-  noticeOpen: false,          // one-time local-storage caution
-  tourAfterAccount: false,    // first-run: notice → account modal → tour
+  noticeOpen: false,          // one-time local-storage caution (guest path)
   status: null, // public/data/status.json — corpus stats for the idle card
   runs: new Map(), // streamId → runtime (non-persisted) pipeline state
 };
@@ -272,56 +272,80 @@ function prefsModal() {
 function accountOverlay() {
   const done = () => {
     app.accountOpen = false;
-    // Restoring on a fresh device: the pulled workspace may already be
-    // onboarded — skip the wizard and land in the app.
-    if (app.screen === "onboard" && store.isOnboarded()) app.screen = "app";
+    // A signed-in account may already carry an onboarded workspace (restore) —
+    // land in the app; a brand-new sign-in still needs the wizard.
+    if (store.isOnboarded()) app.screen = "app";
+    else if (app.screen === "welcome") app.screen = "onboard";
     render();
-    // first-run chain: the storage notice deferred the tour to after this
-    if (app.tourAfterAccount) {
-      app.tourAfterAccount = false;
-      if (app.screen === "app" && !store.isTourSeen()) startTour(ctx());
-    }
   };
   return accountModal({ onClose: done, onSignedIn: done });
 }
 
-// The one-time "your work lives in this browser" caution. Either choice
-// acknowledges it; "register" flows into the account modal.
+// The one-time "your work lives in this browser" caution, shown when a guest
+// chooses to continue without an account. Either choice acknowledges it.
 function noticeOverlay() {
   const ack = () => { store.markStorageNoticeSeen(); app.noticeOpen = false; };
   return storageNoticeModal({
-    onRegister: () => {
-      ack();
-      app.tourAfterAccount = !store.isTourSeen();
-      app.accountOpen = true;
-      render();
-    },
+    onRegister: () => { ack(); app.accountOpen = true; render(); },
     onContinue: () => {
       ack();
+      if (app.screen === "welcome") app.screen = "onboard"; // guest → wizard
       render();
-      if (!store.isTourSeen()) startTour(ctx());
+      if (app.screen === "app" && !store.isTourSeen()) startTour(ctx());
     },
   });
 }
 
+// Front door: sign in / register (sync) vs continue as guest (local only).
+function welcomeScreen() {
+  return h("div", { class: "welcome" },
+    h("div", { class: "welcome-inner" },
+      h("div", { class: "welcome-brand" },
+        h("div", { class: "wb-title" }, "Paper Trails"),
+        h("div", { class: "wb-tag" },
+          "Backward · Main · Forward — a structured literature-review workbench for Information Systems scholars")),
+      h("div", { class: "welcome-choices" },
+        h("button", { class: "welcome-card primary",
+          onclick: () => { app.accountOpen = true; render(); } },
+          h("div", { class: "wc-title" }, "Sign in  ·  Create account"),
+          h("div", { class: "wc-sub" }, "Sync your workspace across every device — browser and Mac app"),
+          h("div", { class: "wc-go" }, "→")),
+        h("button", { class: "welcome-card",
+          onclick: beginGuest },
+          h("div", { class: "wc-title" }, "Continue as guest"),
+          h("div", { class: "wc-sub" }, "Start right away — your work stays in this browser"),
+          h("div", { class: "wc-go" }, "→"))),
+      h("div", { class: "welcome-foot" }, "Open source · bring your own LLM keys · no tracking")));
+}
+
+function beginGuest() {
+  if (store.isStorageNoticeSeen()) { app.screen = "onboard"; render(); return; }
+  app.noticeOpen = true; // notice → onContinue advances welcome → onboard
+  render();
+}
+
 function render() {
+  // A background sync restore can flip the workspace to onboarded while we're
+  // still on the front door — jump straight into the app when that happens.
+  if (app.screen !== "app" && store.isOnboarded()) app.screen = "app";
+
+  if (app.screen === "welcome") {
+    root.replaceChildren(...[
+      welcomeScreen(),
+      app.accountOpen ? accountOverlay() : null,
+      app.noticeOpen ? noticeOverlay() : null,
+    ].filter(Boolean));
+    return;
+  }
   if (app.screen === "onboard") {
-    // renderOnboard re-renders inside its own wrapper, so the sign-in corner
-    // and the account modal live NEXT to it and survive its step changes.
     const wrap = h("div");
     renderOnboard(wrap, {
       mode: "onboard",
       onDone: () => {
         app.screen = "app";
         if (!store.listStreams().length) store.createStream("Untitled review stream");
-        // first run: local-storage caution first (unless signed in), then tour
-        if (!sync.getState().user && !store.isStorageNoticeSeen()) {
-          app.noticeOpen = true;
-          render();
-        } else {
-          render();
-          if (!store.isTourSeen()) startTour(ctx());
-        }
+        render();
+        if (!store.isTourSeen()) startTour(ctx()); // first run → offer the tour
       },
     });
     root.replaceChildren(...[
@@ -371,6 +395,9 @@ window.addEventListener("hashchange", () => receiveHandoff({ rerender: true }));
 // modal open so in-progress edits aren't clobbered; the store cache is already
 // invalidated, so the next render picks the changes up regardless.
 store.onExternalChange(() => {
+  // A sync restore (from sign-in on the front door) can make us onboarded —
+  // advance into the app even from welcome/onboard.
+  if (app.screen !== "app" && store.isOnboarded()) { app.screen = "app"; render(); return; }
   if (app.screen === "app" && !app.prefsOpen && !app.accountOpen) render();
 });
 

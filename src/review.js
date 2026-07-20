@@ -10,12 +10,26 @@ import {
   refineQuery, similarityFilter, rerank, prestigeSort, searchOutside, resolvePapers,
   describeImports, venuePub, VENUES, OUTSIDE_PROMPT_DEFAULT,
 } from "./pipeline.js";
-import { dedupeInto, dropWithinOverlap, sourcesOf } from "./dedupe.js";
+import { dedupeInto, dropWithinOverlap, sourcesOf, recommendersOf } from "./dedupe.js";
 
 function savePrefs(patch) {
   store.saveOnboarding(store.getProfile(), { ...store.getPrefs(), ...patch });
 }
 const outsideProviderOf = (prefs) => prefs.outsideProvider || prefs.provider;
+
+// Providers the user has actually keyed. The Outside-IS search fans out across
+// ALL of these at once (deduping the union), so a paper can be "recommended by"
+// more than one model.
+const keyedProviders = (prefs) => Object.keys(PROVIDERS).filter((p) => prefs.keys[p]?.trim());
+// Which of the keyed providers the outside search will use. Undefined pref =
+// "all keyed" (the default); once the user toggles, an explicit list is stored
+// and intersected with whatever still has a key.
+function selectedOutsideProviders(prefs) {
+  const keyed = keyedProviders(prefs);
+  if (!Array.isArray(prefs.outsideProviders)) return keyed;
+  return keyed.filter((p) => prefs.outsideProviders.includes(p));
+}
+const osModelFor = (prefs, p) => resolveModel(p, prefs.models?.os?.[p]);
 
 // Provider chips + model dropdown. zone: "wi" | "os" — each zone keeps its
 // own provider AND its own per-provider model choice (e.g. Opus for the
@@ -53,16 +67,75 @@ function pickerRow(ctx, zone) {
     zone === "os" && h("div", { class: "note" }, "with web-search tool enabled"));
 }
 
+// Outside-IS model picker: a MULTI-select. Every provider shows as a toggle
+// chip; providers without a key are disabled (non-clickable). The search fans
+// out to all selected+keyed models. A per-model dropdown appears for each
+// selected model so you can still choose the tier.
+function outsidePicker(ctx) {
+  const prefs = store.getPrefs();
+  const selected = new Set(selectedOutsideProviders(prefs));
+  const setSelection = (next) => {
+    savePrefs({ outsideProviders: [...next] });
+    ctx.rerender();
+  };
+  const chips = h("div", { class: "provider-row os" },
+    h("div", { class: "lab" }, "Search with:"),
+    Object.keys(PROVIDERS).map((p) => {
+      const has = !!prefs.keys[p]?.trim();
+      const on = has && selected.has(p);
+      return h("button", {
+        class: `chip multi${on ? " on os" : ""}${has ? "" : " nokey"}`,
+        "aria-pressed": String(on),
+        disabled: !has,
+        title: has
+          ? (on ? `Searching with ${PROVIDERS[p].label} — click to exclude` : `Click to include ${PROVIDERS[p].label}`)
+          : `Add a ${PROVIDERS[p].label} key in Preferences to search with it`,
+        onclick: has ? () => {
+          const next = new Set(selectedOutsideProviders(prefs));
+          next.has(p) ? next.delete(p) : next.add(p);
+          setSelection(next);
+        } : null,
+      }, PROVIDERS[p].label, has ? (on ? h("span", { class: "tick" }, "✓") : null) : h("span", { class: "nokey-tag" }, "no key"));
+    }));
+  // per-selected-model tier dropdowns
+  const models = [...selected].length
+    ? h("div", { class: "os-model-picks" },
+        [...selected].map((p) =>
+          h("label", { class: "os-model-pick" },
+            h("span", { class: "mp-name" }, PROVIDERS[p].label),
+            h("select", { class: "model-select",
+              "aria-label": PROVIDERS[p].label + " model",
+              onchange: (e) => {
+                savePrefs({ models: { ...prefs.models, os: { ...prefs.models.os, [p]: e.target.value } } });
+                ctx.rerender();
+              } },
+              PROVIDERS[p].models.map((m) =>
+                h("option", { value: m.id, selected: m.id === osModelFor(prefs, p) }, m.label))))))
+    : null;
+  return h("div", {}, chips, models);
+}
+
+// Card provenance line: which models recommended it, plus any import tools.
+function badgeFor(p) {
+  const parts = [];
+  const rec = recommendersOf(p);
+  if (rec.length) parts.push((rec.length > 1 ? "Recommended by " : "Found by ") + rec.join(" · "));
+  const tools = sourcesOf(p).filter((s) => s !== "Web search");
+  if (tools.length) parts.push(tools.join(" · "));
+  if (!parts.length) parts.push(sourcesOf(p).join(" · "));
+  return (p.discipline ? p.discipline + " — " : "") + parts.join(" · ");
+}
+
 const IS_STAGES = [
   ["Query refinement & expansion", "LLM reduces ambiguity, adds synonyms & field vocabulary"],
   ["Similarity filtering", "Embedding search over the IS corpus → top 100 candidates " +
     "(first run downloads ~65 MB of corpus + model data, cached after that)"],
   ["LLM reranking with rationales", "Top 100 → 20 papers, each with a relevance rationale"],
 ];
-const OUT_STAGES = (provider) => [
-  [`Searching with ${PROVIDERS[provider]?.label || provider} + web-search tool`,
-    "Looking for relevant papers beyond the IS corpus"],
-  ["Screening & enriching results", "Metadata + citation counts via OpenAlex, dropping IS-corpus overlaps"],
+const OUT_STAGES = (label) => [
+  [`Searching with ${label} + web-search`,
+    "Each model searches the web in parallel for papers beyond the IS corpus"],
+  ["Merging & enriching results", "De-duplicating across models, metadata + citations via OpenAlex, dropping IS-corpus overlaps"],
 ];
 
 // ---- pipeline actions ----
@@ -134,29 +207,49 @@ export async function runReview(ctx, query) {
 export async function runOutside(ctx, query) {
   const { run, rerender } = ctx;
   const prefs = store.getPrefs();
-  const provider = outsideProviderOf(prefs);
-  const key = prefs.keys[provider];
-  if (!key || !key.trim()) return;
-  const model = zoneModel(prefs, "os");
+  const providers = selectedOutsideProviders(prefs);
+  if (!providers.length) return;
   const streamId = ctx.stream.id;
   const profile = store.getProfile();
 
   run.outRunning = true; run.outStage = 1; run.outError = null;
   rerender();
   try {
-    const found = await searchOutside(
-      { query, profile, prefs, provider, key, model, prompt: prefs.outsidePrompt }, 8);
+    // Fan out: every selected model searches the web in parallel. Each result
+    // is tagged with the model that recommended it; when the same paper comes
+    // back from several models, dedupeInto (via mergePapers) unions those tags.
+    const settled = await Promise.allSettled(providers.map((p) =>
+      searchOutside({
+        query, profile, prefs, provider: p, key: prefs.keys[p],
+        model: osModelFor(prefs, p), prompt: prefs.outsidePrompt,
+      }, 8)));
+    const found = [];
+    const errors = [];
+    providers.forEach((p, i) => {
+      const r = settled[i];
+      if (r.status === "fulfilled") {
+        for (const paper of r.value) {
+          found.push({ ...paper, sources: ["Web search"], recommenders: [PROVIDERS[p].label] });
+        }
+      } else {
+        errors.push(`${PROVIDERS[p].label}: ${r.reason?.message || r.reason}`);
+      }
+    });
+    if (!found.length) throw new Error(errors.join(" · ") || "no papers found");
+
     run.outStage = 2;
-    // a fresh web search replaces the previous LLM findings; imported papers
+    // A fresh web search replaces the previous LLM findings; imported papers
     // (any record whose sources go beyond "Web search") stay in the collection.
-    // The replacement happens only now, AFTER the search succeeded — a failed
-    // search leaves the existing collection untouched.
+    // The replacement happens only now, AFTER at least one model succeeded — a
+    // fully failed search leaves the existing collection untouched.
     const prevOutside = store.getStream(streamId)?.outside || [];
     const keptImports = prevOutside.filter((p) => sourcesOf(p).some((s) => s !== "Web search"));
     store.updateStream(streamId, { outside: keptImports, outsideStats: null });
     rerender();
-    await integrateOutside(ctx, found.map((p) => ({ ...p, sources: ["Web search"] })));
+    await integrateOutside(ctx, found);
     run.outRunning = false; run.outStage = 0;
+    // Some models succeeded, some didn't — surface it without failing the run.
+    if (errors.length) toast("Some models couldn't search — " + errors.join("; "));
   } catch (e) {
     console.error(e);
     run.outRunning = false; run.outStage = 0; run.outError = e.message;
@@ -187,9 +280,14 @@ export function startOutside(ctx) {
     return;
   }
   const prefs = store.getPrefs();
-  if (!prefs.keys[outsideProviderOf(prefs)]?.trim()) {
+  if (!keyedProviders(prefs).length) {
     toast("Add an API key in Preferences first");
     app.prefsOpen = true;
+    rerender();
+    return;
+  }
+  if (!selectedOutsideProviders(prefs).length) {
+    toast("Pick at least one model to search with");
     rerender();
     return;
   }
@@ -394,8 +492,8 @@ function queryDock(ctx) {
   const done = !!stream.within && !run.isRunning;
   const prefs = store.getPrefs();
   const wiProv = prefs.provider;
-  const osProv = outsideProviderOf(prefs);
-  const outsideRuns = prefs.outsideEnabled && !!prefs.keys[osProv]?.trim();
+  const osProviders = selectedOutsideProviders(prefs);
+  const outsideRuns = prefs.outsideEnabled && osProviders.length > 0;
   const input = h("input", {
     value: stream.query || "",
     "aria-label": "Research question",
@@ -414,7 +512,7 @@ function queryDock(ctx) {
       !run.isRunning && h("div", { class: "hint run-summary" },
         `Review makes 2 AI calls on your ${PROVIDERS[wiProv].label} key (${modelLabel(wiProv, zoneModel(prefs, "wi"))})` +
         (outsideRuns
-          ? ` and auto-runs the Outside-IS web search on ${PROVIDERS[osProv].label} (${modelLabel(osProv, zoneModel(prefs, "os"))}) — toggle that off in the Outside IS zone.`
+          ? ` and auto-runs the Outside-IS web search on ${osProviders.map((p) => PROVIDERS[p].label).join(" + ")} — toggle that off in the Outside IS zone.`
           : ".")),
       done && h("div", { class: "hint" },
         "Use the ", h("strong", {}, "◀ backward"), " / ", h("strong", {}, "forward ▶"),
@@ -455,8 +553,11 @@ function promptEditor(ctx) {
 function outsideZone(ctx) {
   const { run, stream } = ctx;
   const prefs = store.getPrefs();
-  const provider = outsideProviderOf(prefs);
   const auto = !!prefs.outsideEnabled;
+  const selected = selectedOutsideProviders(prefs);
+  const anyKey = keyedProviders(prefs).length > 0;
+  const stageLabel = (selected.length ? selected : keyedProviders(prefs))
+    .map((p) => PROVIDERS[p].label).join(", ") || "your models";
 
   const outsideGrid = (list) => {
     const st = stream.outsideStats || {};
@@ -470,26 +571,28 @@ function outsideZone(ctx) {
     return [
       h("div", { class: "outside-line" }, bits.join(" · "), exportRow(list, "outside-is-collection")),
       h("div", { class: "results-grid" },
-        list.map((p) => paperCard(p, {
-          variant: "os",
-          badge: (p.discipline ? p.discipline + " — " : "") + sourcesOf(p).join(" · "),
-        }))),
+        list.map((p) => paperCard(p, { variant: "os", badge: badgeFor(p) }))),
     ];
   };
 
   const llmBody = run.outRunning
-    ? stageCard(OUT_STAGES(provider), run.outStage, { os: true })
+    ? stageCard(OUT_STAGES(stageLabel), run.outStage, { os: true })
     : [
-        pickerRow(ctx, "os"),
+        outsidePicker(ctx),
         promptEditor(ctx),
         h("div", { class: "m-actions" },
-          h("button", { class: "btn-import", onclick: () => startOutside(ctx) },
+          h("button", { class: "btn-import", disabled: !selected.length,
+            onclick: () => startOutside(ctx) },
             stream.outside?.some((p) => sourcesOf(p).includes("Web search")) ? "Search the web again" : "Search the web"),
           h("button", { class: `auto-toggle${auto ? " on" : ""}`,
             "aria-pressed": String(auto),
-            title: "When on, this web search also runs automatically with every Review",
+            title: "When on, the web search also runs automatically with every Review",
             onclick: () => { savePrefs({ outsideEnabled: !auto }); ctx.rerender(); } },
             auto ? "✓ auto-runs with each review" : "auto-run with each review: off")),
+        !anyKey && h("div", { class: "os-nokey-note" },
+          "Add an API key in Preferences to search the web with an LLM."),
+        anyKey && !selected.length && h("div", { class: "os-nokey-note" },
+          "Select at least one model above to search."),
         run.outError && h("div", { class: "stage-err" }, "Web search failed — " + run.outError),
       ];
 
@@ -502,7 +605,7 @@ function outsideZone(ctx) {
         h("div", { class: "os-method os-method-llm" },
           h("div", { class: "m-head" },
             h("div", { class: "t" }, "LLM web search"),
-            h("div", { class: "s" }, "Your provider's web-search tool finds papers beyond the IS corpus")),
+            h("div", { class: "s" }, "Every AI you've connected searches the web in parallel; results are merged and de-duplicated")),
           llmBody),
         extPanel(ctx)),
       stream.outside?.length

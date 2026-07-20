@@ -80,11 +80,20 @@ export function sourcesOf(p) {
   return [p.badge || "Web search"];
 }
 
+// Which LLM providers recommended this paper (Outside-IS multi-model search).
+export function recommendersOf(p) {
+  return Array.isArray(p.recommenders) ? p.recommenders : [];
+}
+
 // Merge b into a: keep the richest value per field, union the sources.
+// When two models surfaced the same paper we keep ONE summary/rationale (the
+// richer of the two — `longer`) and union the recommender list.
 export function mergePapers(a, b) {
   const sources = [...new Set([...sourcesOf(a), ...sourcesOf(b)])];
+  const recommenders = [...new Set([...recommendersOf(a), ...recommendersOf(b)])];
   return {
     ...a,
+    recommenders,
     title: longer(a.title, b.title),
     authors: longer(a.authors, b.authors),
     venue: longer(a.venue, b.venue),

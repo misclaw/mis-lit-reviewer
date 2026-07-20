@@ -123,6 +123,17 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 .chip.on { font-weight: 600; border-color: var(--ink); background: var(--ink); color: var(--ink-text); }
 .chip.on.wi { border-color: var(--wi-accent); background: var(--wi-accent); color: #fff; }
 .chip.on.os { border-color: var(--os-accent); background: var(--os-accent); color: #fff; }
+
+/* Outside-IS multi-select model chips */
+.chip.multi { display: inline-flex; align-items: center; gap: 6px; }
+.chip.multi .tick { font-size: 12px; opacity: 0.9; }
+.chip.multi.nokey { opacity: 0.55; cursor: not-allowed; border-style: dashed; }
+.chip.multi.nokey:hover { border-color: var(--input-border); }
+.chip.multi .nokey-tag { font-size: 11px; color: var(--faint); font-weight: 400; }
+.os-model-picks { display: flex; flex-wrap: wrap; gap: 12px 16px; margin: 12px 0 0; }
+.os-model-pick { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--os-sub); }
+.os-model-pick .mp-name { font-weight: 600; }
+.os-nokey-note { font-size: 13px; color: var(--os-sub); margin-top: 12px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* export & view controls (zone heads / result lines) */
@@ -425,15 +436,50 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
   border: 1px solid var(--os-accent); background: var(--os-accent); color: #fff; white-space: nowrap;
 }
 .btn-import.done { border-color: var(--green); background: var(--green-soft); color: var(--green-text); cursor: default; }
+.btn-import:disabled { opacity: 0.5; cursor: not-allowed; }
 .ext-paste { margin-top: 14px; border-top: 1px solid var(--os-rowborder); padding-top: 14px; }
 .ext-paste summary { font-size: 13px; color: var(--os-sub); cursor: pointer; }
 .ext-paste textarea { margin-top: 10px; font-family: monospace; font-size: 12px; min-height: 90px; }
 
 /* ---------- onboarding ---------- */
+/* ---------- welcome / front door ---------- */
+.welcome { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
+.welcome-inner { max-width: 560px; width: 100%; text-align: center; }
+.welcome-brand { margin-bottom: 36px; }
+.wb-title { font-family: var(--serif); font-size: 42px; font-weight: 700; letter-spacing: -0.02em; color: var(--text); }
+.wb-tag { color: var(--muted); margin: 12px auto 0; font-size: 15px; line-height: 1.55; max-width: 440px; }
+.welcome-choices { display: flex; flex-direction: column; gap: 14px; text-align: left; }
+.welcome-card {
+  position: relative; display: block; width: 100%; cursor: pointer;
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 20px 52px 20px 22px; transition: border-color 0.15s, box-shadow 0.15s, transform 0.05s;
+}
+.welcome-card:hover { border-color: var(--hover-border); box-shadow: var(--shadow-pop); }
+.welcome-card:active { transform: translateY(1px); }
+.welcome-card.primary { border-color: var(--wi-accent); background: var(--wi-soft); }
+.wc-title { font-family: var(--serif); font-size: 19px; font-weight: 600; color: var(--text); }
+.wc-sub { color: var(--muted); font-size: 13.5px; margin-top: 4px; line-height: 1.45; }
+.wc-go { position: absolute; right: 22px; top: 50%; transform: translateY(-50%); font-size: 22px; color: var(--faint); }
+.welcome-card.primary .wc-go { color: var(--wi-accent); }
+.welcome-card:hover .wc-go { color: var(--wi-accent); }
+.welcome-foot { margin-top: 30px; font-size: 12px; color: var(--faint); letter-spacing: 0.02em; }
+
 .onb-wrap { max-width: 760px; margin: 0 auto; padding: 48px 24px 80px; }
 .onb-title { text-align: center; margin-bottom: 34px; }
 .onb-title .t { font-family: var(--serif); font-size: 34px; font-weight: 700; letter-spacing: -0.01em; }
 .onb-title .s { color: var(--muted); margin-top: 6px; }
+/* Onboarding progress: a slim segmented bar + a clear current-step heading,
+   in place of the old numbered gray dots. */
+.onb-progress { margin-bottom: 28px; }
+.onb-progress-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.onb-step-name { font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+.onb-step-count { font-size: 11.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.onb-progress-track { display: flex; gap: 5px; }
+.onb-seg { flex: 1; height: 4px; border-radius: 2px; background: var(--input-border); transition: background 0.25s ease; }
+.onb-seg.done { background: var(--wi-accent); cursor: pointer; opacity: 0.55; }
+.onb-seg.done:hover { opacity: 0.8; }
+.onb-seg.now { background: var(--wi-accent); }
+
 .onb-steps { display: flex; justify-content: center; gap: 6px; margin-bottom: 26px; flex-wrap: wrap; }
 .onb-step { display: flex; align-items: center; gap: 6px; }
 .step-dot {

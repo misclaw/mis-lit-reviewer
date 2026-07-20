@@ -222,11 +222,18 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
         mode === "onboard" && h("div", { class: "onb-title" },
           h("div", { class: "t" }, "Paper Trails"),
           h("div", { class: "s" }, "Backward · Main · Forward — a structured literature review workbench for Information Systems scholars")),
-        h("div", { class: "onb-steps" },
-          STEPS.map((label, i) =>
-            h("div", { class: `onb-step${i === draft.step ? " now" : i < draft.step ? " past" : ""}` },
-              h("div", { class: "step-dot" }, i < draft.step ? "✓" : String(i + 1)),
-              h("div", { class: "step-lab" }, label)))),
+        h("div", { class: "onb-progress" },
+          h("div", { class: "onb-progress-head" },
+            h("div", { class: "onb-step-name" }, STEPS[draft.step]),
+            h("div", { class: "onb-step-count" }, `Step ${draft.step + 1} / ${STEPS.length}`)),
+          h("div", { class: "onb-progress-track" },
+            STEPS.map((label, i) =>
+              h("div", {
+                class: `onb-seg${i < draft.step ? " done" : i === draft.step ? " now" : ""}`,
+                title: label,
+                // let users jump back to a completed step, not forward
+                onclick: i < draft.step ? () => { draft.step = i; render(); } : undefined,
+              })))),
         h("div", { class: "onb-card" },
           stepBody(),
           isLast && draft.keyWarn && h("div", { class: "key-warn", role: "alert" }, draft.keyWarn),
