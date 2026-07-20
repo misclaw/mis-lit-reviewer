@@ -8,6 +8,8 @@ import * as store from "./store.js";
 import { collectBackward, collectForward, screenCandidates } from "./citegraph.js";
 import { venueAbbr } from "./pipeline.js";
 import { resolveModel } from "./llm.js";
+import { paperCard } from "./review.js";
+import { exportRow } from "./export.js";
 
 const PITCH = 160;       // vertical rhythm of the selected-paper column
 const CARD_W = 470;      // both columns
@@ -57,7 +59,7 @@ export async function ensureGraph(ctx, dir) {
 }
 
 function stageCard(dir, current, error) {
-  return h("div", { class: "stage-card" },
+  return h("div", { class: "stage-card", role: "status", "aria-live": "polite" },
     STAGES(dir).map(([lab, det], i) => {
       const n = i + 1;
       const state = current > n ? "done" : current === n ? "active" : "pending";
@@ -78,6 +80,13 @@ function gCard(p, { main = false, x, y, hClamp, sel = false, linkNote, onClick }
     class: `gcard ${main ? "main" : "other"}${sel ? " sel" : ""}`,
     style: { left: x + "px", top: y + "px", height: hClamp + "px" },
     onclick: onClick,
+    ...(onClick && {
+      role: "button", tabindex: 0, "aria-pressed": String(sel),
+      "aria-label": "Highlight citation links for: " + (p.title || "untitled paper"),
+      onkeydown: (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); }
+      },
+    }),
   },
     h("div", { class: "gt" },
       p.url || p.doi
@@ -155,12 +164,26 @@ function graphBody(ctx, dir, data) {
   ];
 }
 
+// Plain list of the selected papers — the responsive default on narrow
+// screens, where the fixed-width two-column canvas would force panning.
+function listBody(ctx, dir, data) {
+  const nM = ctx.stream.within?.length || 0;
+  const isBack = dir === "back";
+  return h("div", { class: "results-grid graph-list" },
+    data.selected.map((p, i) => paperCard(p, {
+      variant: isBack ? "wi" : "os", rank: i + 1,
+      badge: (isBack ? "Cited by " : "Cites ") + (p.links?.length || 0) + `/${nM} main papers`,
+    })));
+}
+
 export function renderGraph(ctx, dir) {
   const stream = ctx.stream;
   const g = ctx.run.graph[dir];
   const field = dir === "back" ? "backward" : "forward";
   const data = stream[field];
   const isBack = dir === "back";
+  // view: explicit choice, else graph on wide screens, list on narrow ones
+  const view = g.view || (matchMedia("(max-width: 900px)").matches ? "list" : "graph");
 
   let sub = "";
   if (data) {
@@ -174,7 +197,7 @@ export function renderGraph(ctx, dir) {
   if (!stream.within?.length) {
     bodyEl = h("div", { class: "graph-empty" }, "Run a main review first — the backward/forward steps trace citations from its 20 papers.");
   } else if (data) {
-    bodyEl = graphBody(ctx, dir, data);
+    bodyEl = view === "list" ? listBody(ctx, dir, data) : graphBody(ctx, dir, data);
   } else if (g.running) {
     bodyEl = stageCard(dir, g.stage, null);
   } else if (g.error) {
@@ -189,6 +212,11 @@ export function renderGraph(ctx, dir) {
         h("div", { class: "zone-title" }, isBack ? "◀ Go backward" : "Go forward ▶"),
         h("div", { class: "zone-sub" }, sub),
         h("div", { class: "spacer" }),
+        data && exportRow(data.selected, isBack ? "backward-citations" : "forward-citations"),
+        data && h("div", { class: "view-toggle" },
+          [["list", "List"], ["graph", "Graph"]].map(([v, label]) =>
+            h("button", { class: `chip${view === v ? " on" : ""}`, "aria-pressed": String(view === v),
+              onclick: () => { g.view = v; ctx.rerender(); } }, label))),
         h("button", { class: "btn btn-sm", onclick: () => ctx.actions.goMode("main") }, "Return to main review")),
       bodyEl));
 }

@@ -127,11 +127,10 @@ export async function screenCandidates({ dir, mains, candidates, query, provider
     model,
     maxTokens: 6000,
     system:
-      `You are doing the "${dir === "back" ? "go backward" : "go forward"}" step of a Webster & Watson (2002) literature review. ` +
       (dir === "back"
         ? "The candidates are prior works CITED BY the main review set — pick the ones a reviewer must trace back to (foundational theory, source constructs, seminal methods)."
-        : "The candidates are later works CITING the main review set — pick the ones that carry the conversation forward (extensions, boundary conditions, recent turns of the stream).") +
-      ` Select and rank the ${n} most important for this research question. Reply with JSON only: ` +
+        : "The candidates are later works CITING the main review set — pick the ones that carry the conversation forward (extensions, boundary conditions, recent developments).") +
+      ` Select and rank the ${n} most important for the research question. Reply with JSON only: ` +
       "{\"picks\": [{\"i\": <candidate index>, \"rationale\": <one sentence on why it belongs in the review>}]} " +
       `— exactly ${n} picks (fewer only if fewer are relevant), most important first.`,
     user: `Research question: ${query}\n\nMain review set:\n${mainsList}\n\nCandidates:\n${candList}`,

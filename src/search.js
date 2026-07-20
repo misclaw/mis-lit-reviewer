@@ -50,9 +50,14 @@ async function fetchChunked(base, name, manifest) {
 }
 
 // Memoized: search and browse views both call this; only the first call
-// actually downloads (concurrent callers share the same promise).
+// actually downloads (concurrent callers share the same promise). A FAILED
+// download must not stay memoized — clear it so the next call retries,
+// instead of every later search rejecting with the same stale error.
 export function loadIndex(onStep) {
-  if (!indexP) indexP = _loadIndex(onStep);
+  if (!indexP) {
+    indexP = _loadIndex(onStep);
+    indexP.catch(() => { indexP = null; });
+  }
   return indexP;
 }
 

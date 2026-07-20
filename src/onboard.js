@@ -25,11 +25,15 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
     profile: getProfile(),
     prefs: getPrefs(),
     step: 0,
-    verifying: {}, // provider → "busy" | "ok" | "err"
+    verifying: {},  // provider → "busy" | "ok" | "err"
+    verifyErr: {},  // provider → last verification error message
+    keyWarn: null,  // footer warning after a failed finish-time verification
+    allowUnverified: false, // second click on "Start anyway" proceeds
   };
   for (const [prov, ok] of Object.entries(draft.prefs.verified || {})) {
     if (ok && draft.prefs.keys[prov]) draft.verifying[prov] = "ok";
   }
+  const baseline = JSON.stringify({ profile: draft.profile, prefs: draft.prefs });
 
   const toggle = (arr, v) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const anyKey = () => Object.values(draft.prefs.keys).some((k) => k && k.trim());
@@ -42,6 +46,7 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
         const on = single ? selected === val : selected.includes(val);
         return h("button", {
           class: `chip${on ? " on" : ""}${on && accent ? " " + accent : ""}`,
+          "aria-pressed": String(on),
           onclick: () => { onPick(val); render(); },
         }, label);
       }));
@@ -93,19 +98,20 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
     ];
     // step 4 — API keys
     return [
-      h("div", { class: "onb-h" }, "Connect an LLM provider"),
+      h("div", { class: "onb-h" }, "Connect an LLM provider ", h("span", { class: "opt" }, "(optional)")),
       h("div", { class: "onb-sub" },
-        "The Within-IS pipeline (query refinement, reranking, rationales) needs at least one key. " +
-        "Outside-IS works without any API — the browser extension imports from external tools — " +
-        "though its own web search also needs a key. Keys are stored in this browser and sent only to their provider."),
+        "The AI features (query refinement, reranking, rationales, web search) need one key, verified before you start. " +
+        "No key? You can still start and import papers from external tools via the browser extension — " +
+        "add a key any time in Preferences. Keys are stored in this browser and sent only to their provider."),
       Object.keys(PROVIDERS).map((prov) => keyRow(prov)),
       h("button", { class: `outside-toggle${p.outsideEnabled ? " on" : ""}`,
+        "aria-pressed": String(!!p.outsideEnabled),
         onclick: () => { p.outsideEnabled = !p.outsideEnabled; render(); } },
         h("div", { class: "box" }, p.outsideEnabled ? "✓" : ""),
         h("div", {},
-          h("div", { class: "big" }, "Enable general (outside-IS) literature search via LLM API"),
+          h("div", { class: "big" }, "Auto-run the outside-IS web search with each review"),
           h("div", { class: "small" },
-            "If disabled, use the browser extension to import results manually from Google Scholar Labs, Asta, Paper Digest, or SciSpace."))),
+            "Either way you can run it manually on the main page — or import results from Google Scholar Labs, Asta, Paper Digest, or SciSpace via the browser extension."))),
       h("div", { class: "privacy-note" },
         h("strong", {}, "Worried about pasting a key into a website? "),
         "Fair. This project is open-source — review the code and run it locally instead. We collect preferences only, never your search activity."),
@@ -125,18 +131,22 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
     return h("div", { class: "key-row" },
       h("div", { class: "kname" }, meta.label),
       h("input", { type: "password", value: p.keys[prov], placeholder: meta.ph,
+        "aria-label": meta.label + " API key",
         oninput: (e) => {
           p.keys[prov] = e.target.value;
           if (draft.verifying[prov]) { delete draft.verifying[prov]; p.verified[prov] = false; }
+          delete draft.verifyErr[prov];
+          draft.allowUnverified = false; draft.keyWarn = null;
           // live-sync the affordances without a re-render (which would drop focus):
-          // this row's Verify button, and the footer's finish gate
+          // this row's Verify button, and the footer's label
           const vb = e.target.closest(".key-row")?.querySelector(".btn-verify");
           if (vb) {
             vb.className = e.target.value.trim() ? "btn-verify ready" : "btn-verify";
             vb.textContent = "Verify";
           }
+          e.target.closest(".key-row")?.querySelector(".key-err")?.remove();
           const foot = container.querySelector(".onb-foot .btn-ink");
-          if (foot && draft.step === STEPS.length - 1) foot.disabled = !anyKey();
+          if (foot && draft.step === STEPS.length - 1) foot.textContent = finishLabel();
         } }),
       h("button", { class: btnClass, disabled: state === "busy",
         onclick: async (e) => {
@@ -145,12 +155,16 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
           try {
             await verifyKey(prov, p.keys[prov]);
             draft.verifying[prov] = "ok"; p.verified[prov] = true;
+            delete draft.verifyErr[prov];
           } catch (err) {
             draft.verifying[prov] = "err"; p.verified[prov] = false;
+            draft.verifyErr[prov] = err.message;
             console.warn(err);
           }
           render();
-        } }, btnLabel));
+        } }, btnLabel),
+      state === "err" && draft.verifyErr[prov] &&
+        h("div", { class: "key-err", role: "alert" }, "Key rejected — " + draft.verifyErr[prov]));
   }
 
   function finish() {
@@ -163,14 +177,50 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
     onDone?.();
   }
 
+  function finishLabel() {
+    if (mode === "edit") return draft.allowUnverified ? "Save anyway" : "Save preferences";
+    if (draft.allowUnverified) return "Start anyway →";
+    if (!anyKey()) return "Start without a key →";
+    return "Start reviewing →";
+  }
+
+  // Finish gate: entered keys get verified before completion so a bad key
+  // fails HERE, with a diagnosis — not minutes later inside a review run.
+  // A second click ("Start anyway") lets the user proceed regardless.
+  async function tryFinish() {
+    const entered = Object.keys(PROVIDERS).filter((x) => draft.prefs.keys[x]?.trim());
+    const unverified = entered.filter((x) => draft.verifying[x] !== "ok");
+    if (!unverified.length || draft.allowUnverified) { finish(); return; }
+    draft.keyWarn = null;
+    for (const x of unverified) draft.verifying[x] = "busy";
+    render();
+    const failed = [];
+    await Promise.all(unverified.map(async (x) => {
+      try {
+        await verifyKey(x, draft.prefs.keys[x]);
+        draft.verifying[x] = "ok"; draft.prefs.verified[x] = true;
+        delete draft.verifyErr[x];
+      } catch (err) {
+        draft.verifying[x] = "err"; draft.prefs.verified[x] = false;
+        draft.verifyErr[x] = err.message;
+        failed.push(PROVIDERS[x].label);
+      }
+    }));
+    if (!failed.length) { finish(); return; }
+    draft.allowUnverified = true;
+    draft.keyWarn = `The ${failed.join(" and ")} key ${failed.length === 1 ? "was" : "were"} rejected ` +
+      `(details above) — fix it, or click “${finishLabel()}” to continue with a key that will likely fail.`;
+    render();
+  }
+
   function render() {
     const isLast = draft.step === STEPS.length - 1;
-    const canNext = !isLast || anyKey();
+    const busy = Object.values(draft.verifying).includes("busy");
     container.replaceChildren(
       h("div", { class: "onb-wrap" },
         mode === "onboard" && h("div", { class: "onb-title" },
           h("div", { class: "t" }, "Paper Trails"),
-          h("div", { class: "s" }, "Backward · Main · Forward — a structured literature review workbench for Information Systems scholars, after Webster & Watson (2002)")),
+          h("div", { class: "s" }, "Backward · Main · Forward — a structured literature review workbench for Information Systems scholars")),
         h("div", { class: "onb-steps" },
           STEPS.map((label, i) =>
             h("div", { class: `onb-step${i === draft.step ? " now" : i < draft.step ? " past" : ""}` },
@@ -178,18 +228,19 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
               h("div", { class: "step-lab" }, label)))),
         h("div", { class: "onb-card" },
           stepBody(),
+          isLast && draft.keyWarn && h("div", { class: "key-warn", role: "alert" }, draft.keyWarn),
           h("div", { class: "onb-foot" },
-            draft.step === 0 && mode === "edit"
-              ? h("button", { class: "btn", onclick: () => onCancel?.() }, "Cancel")
-              : h("button", { class: "btn", disabled: draft.step === 0,
-                  onclick: () => { if (draft.step > 0) { draft.step--; render(); } } }, "Back"),
-            h("button", { class: "btn-ink", disabled: !canNext,
+            mode === "edit" && h("button", { class: "btn", onclick: () => onCancel?.() }, "Cancel"),
+            h("button", { class: "btn", disabled: draft.step === 0,
+              onclick: () => { if (draft.step > 0) { draft.step--; render(); } } }, "Back"),
+            h("button", { class: "btn-ink", disabled: busy,
               onclick: () => {
                 if (!isLast) { draft.step++; render(); }
-                else if (anyKey()) finish();
+                else tryFinish();
               } },
-              isLast ? (mode === "edit" ? "Save preferences" : "Start reviewing →") : "Continue")))));
+              isLast ? (busy ? "Verifying…" : finishLabel()) : "Continue")))));
   }
 
   render();
+  return { isDirty: () => JSON.stringify({ profile: draft.profile, prefs: draft.prefs }) !== baseline };
 }

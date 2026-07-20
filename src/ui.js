@@ -30,7 +30,7 @@ export function fmtCites(n) {
 let toastEl = null, toastT = null;
 export function toast(msg) {
   if (!toastEl) {
-    toastEl = h("div", { class: "toast" });
+    toastEl = h("div", { class: "toast", role: "status", "aria-live": "polite" });
     document.body.append(toastEl);
   }
   toastEl.textContent = msg;

@@ -92,6 +92,11 @@ input, textarea {
   background: var(--card); color: var(--text); width: 100%;
 }
 ::placeholder { color: var(--ghost); }
+/* keyboard navigation needs a visible, deliberate focus ring everywhere */
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--wi-accent, #3b5bdb); outline-offset: 2px;
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
@@ -119,6 +124,17 @@ input, textarea {
 .chip.on.wi { border-color: var(--wi-accent); background: var(--wi-accent); color: #fff; }
 .chip.on.os { border-color: var(--os-accent); background: var(--os-accent); color: #fff; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* export & view controls (zone heads / result lines) */
+.export-row { display: inline-flex; align-items: center; gap: 6px; }
+.export-row .lab { font-size: 12px; font-weight: 600; color: var(--faint); }
+.outside-line .export-row { margin-left: 12px; }
+.export-btn {
+  font-size: 12px; font-weight: 600; padding: 4px 10px; border: 1px solid var(--input-border);
+  border-radius: 999px; background: var(--card); color: var(--muted); cursor: pointer;
+}
+.export-btn:hover { border-color: var(--hover-border); color: var(--text); }
+.view-toggle { display: inline-flex; gap: 6px; }
 
 /* ---------- top navigation ---------- */
 .nav { background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20; }
@@ -262,18 +278,23 @@ input, textarea {
   margin-top: 10px; font-size: 13px; color: var(--danger); background: var(--soft);
   border-radius: 6px; padding: 8px 10px;
 }
+.stage-err.banner { margin-top: 12px; border: 1px solid var(--danger); font-weight: 600; }
 
 /* refined-query line */
 .refined-line { margin-top: 12px; font-size: 13px; color: var(--wi-sub); }
 .refined-line em, .refined-line strong { color: var(--wi-head); }
 
 /* ---------- paper cards ---------- */
-.results-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 14px; }
-@media (max-width: 900px) { .results-grid { grid-template-columns: 1fr; } }
+.results-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+@media (max-width: 900px) { .results-grid { grid-template-columns: minmax(0, 1fr); } }
 .paper-card {
   background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-  padding: 16px 18px; animation: fadeUp 0.3s ease;
+  padding: 16px 18px; animation: fadeUp 0.3s ease; min-width: 0; overflow: hidden;
 }
+/* long queries, titles, DOIs, and raw URLs must wrap inside their cards —
+   imported records sometimes arrive as one unbroken string */
+.p-title, .p-meta, .p-summary, .p-rationale, .p-foot,
+.refined-line, .outside-line, .stage-err, .os-note, .toast { overflow-wrap: anywhere; }
 .paper-card.wi { border-color: var(--wi-border); }
 .paper-card.os { border-color: var(--os-border); }
 .paper-card .top { display: flex; gap: 10px; align-items: baseline; }
@@ -337,12 +358,27 @@ input, textarea {
 }
 .prompt-actions { display: flex; gap: 8px; margin-top: 8px; }
 
-.pillbar { display: flex; gap: 4px; background: var(--os-chipbg); border-radius: 999px; padding: 3px; }
-.pill {
-  font-size: 13px; font-weight: 600; padding: 6px 14px; border: none; border-radius: 999px;
-  cursor: pointer; background: none; color: var(--os-sub);
+/* the two outside-IS method cards — LLM web search · external tools */
+.os-methods {
+  display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 14px; margin-top: 14px; align-items: start;
 }
-.pill.on { background: var(--os-accent); color: #fff; }
+@media (max-width: 1000px) { .os-methods { grid-template-columns: minmax(0, 1fr); } }
+.os-method {
+  background: var(--card); border: 1px solid var(--os-border); border-radius: 10px;
+  padding: 18px 20px; min-width: 0;
+}
+.os-method .m-head { margin-bottom: 10px; }
+.os-method .m-head .t { font-weight: 700; color: var(--os-head); }
+.os-method .m-head .s { font-size: 12.5px; color: var(--os-faint); margin-top: 2px; }
+.os-method .stage-card { margin-top: 0; border-color: var(--os-border); }
+.m-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.auto-toggle {
+  font-size: 12.5px; padding: 7px 12px; border: 1px solid var(--os-border); border-radius: 999px;
+  background: none; color: var(--os-faint); cursor: pointer;
+}
+.auto-toggle.on { color: var(--green-text); background: var(--green-soft); border-color: var(--green); }
+.outside-line.empty { font-weight: 400; color: var(--os-faint); }
 .provider-row { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; }
 .provider-row .lab { font-size: 13px; color: var(--os-sub); }
 .provider-row .note { font-size: 12px; color: var(--os-faint); }
@@ -352,10 +388,6 @@ input, textarea {
 }
 .outside-line { margin-top: 12px; font-size: 13px; color: var(--os-sub); font-weight: 600; }
 
-.ext-card { background: var(--card); border: 1px solid var(--os-border); border-radius: 10px; padding: 20px 24px; }
-.ext-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; flex-wrap: wrap; }
-.ext-head .t { font-weight: 700; color: var(--os-head); }
-.ext-head .s { font-size: 12px; color: var(--os-faint); }
 .ext-status { font-size: 13.5px; color: var(--os-sub); margin-top: 12px; }
 .ext-status.ok {
   color: var(--green-text); background: var(--green-soft); border-radius: 7px;
@@ -373,10 +405,10 @@ input, textarea {
   border-radius: 999px; background: var(--os-soft); color: var(--os-head); text-decoration: none;
 }
 .tool-launch:hover { border-color: var(--os-accent); color: var(--os-head); text-decoration: none; }
-.ext-rows { display: grid; gap: 10px; margin-top: 14px; }
+.ext-rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 14px; }
 .ext-row {
   display: flex; align-items: center; gap: 14px; border: 1px solid var(--os-rowborder);
-  border-radius: 8px; padding: 12px 14px;
+  border-radius: 8px; padding: 12px 14px; min-width: 0;
 }
 .ext-row .badge {
   width: 34px; height: 34px; border-radius: 8px; background: var(--os-bg); flex: none;
@@ -430,9 +462,14 @@ input, textarea {
   font-size: 13px; color: var(--muted);
 }
 .privacy-note strong { color: var(--text); }
-.key-row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+.key-row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
 .key-row .kname { width: 92px; font-weight: 600; font-size: 13px; color: var(--muted); flex: none; }
 .key-row input { flex: 1; font-family: monospace; font-size: 13px; padding: 9px 12px; }
+.key-err { flex-basis: 100%; font-size: 12.5px; color: var(--danger); padding-left: 102px; overflow-wrap: anywhere; }
+.key-warn {
+  margin-top: 14px; font-size: 13px; color: var(--danger); background: var(--soft);
+  border: 1px solid var(--danger); border-radius: 6px; padding: 9px 12px; overflow-wrap: anywhere;
+}
 .btn-verify {
   font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 7px; cursor: pointer;
   border: 1px solid var(--input-border); background: var(--card); color: var(--ghost); white-space: nowrap;
@@ -525,6 +562,26 @@ input, textarea {
   background: var(--card); border: 1px solid var(--border); border-radius: 10px;
   padding: 22px 24px; margin-top: 18px; max-width: 640px; color: var(--muted);
 }
+
+/* ---------- guided tour ---------- */
+.nav-help { font-weight: 700; min-width: 32px; }
+.tour-layer { position: fixed; inset: 0; z-index: 70; pointer-events: none; }
+.tour-ring {
+  position: fixed; border-radius: 12px; border: 2px solid var(--link);
+  box-shadow: 0 0 0 200vmax var(--overlay); transition: all 0.25s ease;
+}
+.tour-card {
+  position: fixed; width: min(340px, calc(100vw - 32px)); pointer-events: auto;
+  background: var(--card); border: 1px solid var(--input-border); border-radius: 12px;
+  box-shadow: var(--shadow-pop); padding: 16px 18px; animation: fadeUp 0.25s ease;
+}
+.tour-card .tour-step {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: var(--faint);
+}
+.tour-card .tour-title { font-family: var(--serif); font-size: 17px; font-weight: 700; margin-top: 2px; }
+.tour-card .tour-body { font-size: 13.5px; color: var(--muted); margin-top: 6px; }
+.tour-card .tour-actions { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+.tour-card .tour-actions .spacer { flex: 1; }
 
 /* ---------- misc ---------- */
 .toast {

@@ -27,7 +27,9 @@ const EMPTY = () => ({
   profile: { name: "", email: "" },
   prefs: DEFAULT_PREFS(),
   onboarded: false,
+  tourSeen: false,
   streams: [],
+  lastStreamId: null, // the stream the user last worked in — restored on boot
   sessions: [], // captured by the extension / handed off from other apps
 });
 
@@ -87,6 +89,20 @@ export function saveOnboarding(profile, prefs) {
   d.prefs = { ...d.prefs, ...prefs };
   d.onboarded = true;
   save();
+}
+
+// ---- last active stream / tour flag ----
+export function getLastStreamId() { return load().lastStreamId || null; }
+export function setLastStreamId(id) {
+  const d = load();
+  if (d.lastStreamId === id) return;
+  d.lastStreamId = id;
+  save();
+}
+export function isTourSeen() { return !!load().tourSeen; }
+export function markTourSeen() {
+  const d = load();
+  if (!d.tourSeen) { d.tourSeen = true; save(); }
 }
 
 // ---- review streams ----
@@ -162,19 +178,64 @@ export function deleteSession(id) {
 }
 
 // ---- export / import (whole store as JSON) ----
+// Exports NEVER include API keys (or their verified flags): an export file is
+// meant to be shareable/archivable, and keys are paid credentials.
 export function exportStore() {
-  return JSON.stringify({ version: 2, exported_at: now(), ...load() }, null, 2);
+  const d = load();
+  return JSON.stringify({
+    version: 2, exported_at: now(), ...d,
+    prefs: { ...d.prefs, keys: { anthropic: "", openai: "", gemini: "" }, verified: {} },
+  }, null, 2);
 }
+
+// Validate + summarize an export file without touching the store, so the UI
+// can show what an import would do before it happens.
+export function previewImport(json) {
+  const d = JSON.parse(json);
+  if (!d || typeof d !== "object" || !("streams" in d || "prefs" in d))
+    throw new Error("not a valid export file");
+  return {
+    streams: Array.isArray(d.streams) ? d.streams.length : 0,
+    sessions: Array.isArray(d.sessions) ? d.sessions.length : 0,
+    exported_at: d.exported_at || null,
+  };
+}
+
+const BACKUP_KEY = KEY + ":backup";
+export function hasImportBackup() {
+  try { return !!localStorage.getItem(BACKUP_KEY); } catch { return false; }
+}
+export function restoreImportBackup() {
+  const b = localStorage.getItem(BACKUP_KEY);
+  if (!b) throw new Error("no pre-import backup found");
+  localStorage.setItem(KEY, b);
+  localStorage.removeItem(BACKUP_KEY);
+  cache = null;
+}
+
 export function importStore(json) {
   const d = JSON.parse(json);
   if (!d || typeof d !== "object" || !("streams" in d || "prefs" in d))
     throw new Error("not a valid export file");
+  const cur = load();
+  // keys survive an import: exports don't carry them, and clobbering the
+  // browser's working keys with blanks would silently break every pipeline
+  const keys = { ...cur.prefs.keys };
+  for (const [k, v] of Object.entries(d.prefs?.keys || {})) {
+    if (v && v.trim()) keys[k] = v;
+  }
+  try { localStorage.setItem(BACKUP_KEY, localStorage.getItem(KEY) || ""); } catch { /* quota */ }
   cache = {
     ...EMPTY(),
     profile: d.profile || EMPTY().profile,
-    prefs: { ...DEFAULT_PREFS(), ...(d.prefs || {}) },
+    prefs: {
+      ...DEFAULT_PREFS(), ...(d.prefs || {}), keys,
+      verified: { ...cur.prefs.verified, ...(d.prefs?.verified || {}) },
+    },
     onboarded: !!d.onboarded,
+    tourSeen: !!d.tourSeen,
     streams: Array.isArray(d.streams) ? d.streams : [],
+    lastStreamId: d.lastStreamId || null,
     sessions: Array.isArray(d.sessions) ? d.sessions : [],
   };
   save();

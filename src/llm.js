@@ -10,14 +10,15 @@
 //                                            web-search tool enabled
 
 // Per-provider model catalogs (curated; ids verified against the live APIs).
-// The first entry is the default. Users pick per provider — the choice is
-// shared by every pipeline step that runs on that provider.
+// The entry flagged `def` is the default — the balanced tier, NOT the most
+// expensive one: these are metered calls on the user's own key, so opting UP
+// to the premium model should be a choice, never the silent default.
 export const PROVIDERS = {
   anthropic: {
     label: "Claude", ph: "sk-ant-…",
     models: [
       { id: "claude-opus-4-8",  label: "Opus 4.8 — most capable" },
-      { id: "claude-sonnet-5",  label: "Sonnet 5 — fast, near-Opus" },
+      { id: "claude-sonnet-5",  label: "Sonnet 5 — fast, near-Opus", def: true },
       { id: "claude-haiku-4-5", label: "Haiku 4.5 — fastest, cheapest" },
     ],
   },
@@ -25,7 +26,7 @@ export const PROVIDERS = {
     label: "GPT", ph: "sk-…",
     models: [
       { id: "gpt-5.6-sol",   label: "GPT-5.6 Sol — most capable" },
-      { id: "gpt-5.6-terra", label: "GPT-5.6 Terra — balanced" },
+      { id: "gpt-5.6-terra", label: "GPT-5.6 Terra — balanced", def: true },
       { id: "gpt-5.6-luna",  label: "GPT-5.6 Luna — light" },
       { id: "gpt-5.5",       label: "GPT-5.5" },
       { id: "gpt-5.4-mini",  label: "GPT-5.4 mini — cheapest" },
@@ -34,7 +35,7 @@ export const PROVIDERS = {
   gemini: {
     label: "Gemini", ph: "AIza…",
     models: [
-      { id: "gemini-3.5-flash",      label: "Gemini 3.5 Flash — default" },
+      { id: "gemini-3.5-flash",      label: "Gemini 3.5 Flash — default", def: true },
       { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (preview)" },
       { id: "gemini-2.5-pro",        label: "Gemini 2.5 Pro" },
       { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite — cheapest" },
@@ -43,7 +44,12 @@ export const PROVIDERS = {
 };
 
 export function defaultModel(provider) {
-  return PROVIDERS[provider]?.models[0]?.id;
+  const list = PROVIDERS[provider]?.models || [];
+  return (list.find((m) => m.def) || list[0])?.id;
+}
+export function modelLabel(provider, id) {
+  const m = PROVIDERS[provider]?.models.find((m) => m.id === id);
+  return m ? m.label.split(" — ")[0] : id;
 }
 export function resolveModel(provider, model) {
   const list = PROVIDERS[provider]?.models || [];
@@ -51,11 +57,15 @@ export function resolveModel(provider, model) {
 }
 
 export class LLMError extends Error {
-  constructor(provider, message) {
+  constructor(provider, message, status = null) {
     super(`${PROVIDERS[provider]?.label || provider}: ${message}`);
     this.provider = provider;
+    this.status = status; // HTTP status when the provider rejected the request
   }
 }
+// 401/403 = the key itself is bad — callers fail fast with a pointed message
+// instead of letting the pipeline limp on to a later, more confusing failure.
+export const isAuthError = (e) => e?.status === 401 || e?.status === 403;
 
 // Pull the first JSON object/array out of a completion that may wrap it in
 // prose or a ```json fence. Throws if nothing parses.
@@ -88,7 +98,7 @@ async function req(provider, url, init) {
       const j = await res.json();
       detail = j.error?.message || j.error?.status || JSON.stringify(j).slice(0, 200);
     } catch { /* keep status only */ }
-    throw new LLMError(provider, `HTTP ${res.status}${detail ? " — " + detail : ""}`);
+    throw new LLMError(provider, `HTTP ${res.status}${detail ? " — " + detail : ""}`, res.status);
   }
   return res.json();
 }

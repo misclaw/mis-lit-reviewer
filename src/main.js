@@ -10,12 +10,13 @@ import { renderOnboard } from "./onboard.js";
 import { renderReview } from "./review.js";
 import { renderGraph, ensureGraph } from "./graph.js";
 import { parseInbound } from "./handoff.js";
+import { startTour } from "./tour.js";
 
 const root = document.getElementById("app");
 
 const app = {
   screen: store.isOnboarded() ? "app" : "onboard",
-  streamId: null,
+  streamId: store.getLastStreamId(), // resume where the user left off
   mode: "main", // main | back | fwd
   streamOpen: false,
   prefsOpen: false,
@@ -27,7 +28,7 @@ function runFor(id) {
   if (!app.runs.has(id)) {
     app.runs.set(id, {
       isRunning: false, isStage: 0, isError: null, refineNote: null,
-      outRunning: false, outStage: 0, outError: null, outsideTab: "llm",
+      outRunning: false, outStage: 0, outError: null,
       graph: { back: { running: false, stage: 0, error: null, sel: null },
                fwd: { running: false, stage: 0, error: null, sel: null } },
     });
@@ -40,10 +41,21 @@ function currentStream() {
   if (!streams.length) {
     const s = store.createStream("Untitled review stream");
     app.streamId = s.id;
+    store.setLastStreamId(s.id);
     return s;
   }
   let s = streams.find((x) => x.id === app.streamId);
-  if (!s) { s = streams[0]; app.streamId = s.id; }
+  if (!s) {
+    // no remembered selection (or it was deleted) — fall back to the most
+    // recently touched stream, so returning from the extension or a reload
+    // lands on the recent work, not the oldest stream
+    s = streams.reduce((a, b) => ((b.updated_at || "") > (a.updated_at || "") ? b : a));
+    app.streamId = s.id;
+    store.setLastStreamId(s.id);
+  }
+  // NOTE: don't persist on the found path — currentStream runs on every
+  // render (including renders triggered by other tabs via the storage event),
+  // and writing here would clobber a selection just made in another tab
   return store.getStream(s.id);
 }
 
@@ -100,15 +112,33 @@ function streamMenu(stream) {
     onchange: async (e) => {
       const f = e.target.files?.[0];
       if (!f) return;
-      try { store.importStore(await f.text()); location.reload(); }
-      catch (err) { toast("Import failed: " + err.message); }
+      try {
+        const text = await f.text();
+        const info = store.previewImport(text);
+        const nStreams = store.listStreams().length;
+        const nSessions = store.listSessions().length;
+        const ok = confirm(
+          `Import “${f.name}”` +
+          (info.exported_at ? ` (exported ${info.exported_at.slice(0, 10)})` : "") + `?\n\n` +
+          `This REPLACES the current workspace — ${nStreams} stream${nStreams === 1 ? "" : "s"}, ` +
+          `${nSessions} captured session${nSessions === 1 ? "" : "s"} — with the file's contents ` +
+          `(${info.streams} stream${info.streams === 1 ? "" : "s"}, ${info.sessions} session${info.sessions === 1 ? "" : "s"}).\n\n` +
+          `Your API keys are kept as they are. The current workspace is saved as a backup, ` +
+          `restorable from this menu.`);
+        if (!ok) return;
+        store.importStore(text);
+        location.reload();
+      } catch (err) { toast("Import failed: " + err.message); }
     } });
   return h("div", { class: "stream-menu" },
     h("div", { class: "menu-label" }, "Review streams"),
     streams.map((s) =>
       h("div", { class: "row" },
         h("button", { class: `stream-item${s.id === stream.id ? " on" : ""}`,
-          onclick: () => { app.streamId = s.id; app.streamOpen = false; app.mode = "main"; render(); } },
+          onclick: () => {
+            app.streamId = s.id; store.setLastStreamId(s.id);
+            app.streamOpen = false; app.mode = "main"; render();
+          } },
           s.name),
         streams.length > 1 && h("button", { class: "stream-del", title: "Delete stream",
           onclick: () => {
@@ -121,7 +151,8 @@ function streamMenu(stream) {
     h("button", { class: "stream-add",
       onclick: () => {
         const s = store.createStream("Untitled review stream " + (streams.length + 1));
-        app.streamId = s.id; app.streamOpen = false; app.mode = "main";
+        app.streamId = s.id; store.setLastStreamId(s.id);
+        app.streamOpen = false; app.mode = "main";
         render();
       } }, "+ New review stream"),
     h("button", { class: "stream-add", style: { borderTop: "none", color: "var(--muted)", fontWeight: 400 },
@@ -129,9 +160,16 @@ function streamMenu(stream) {
         const blob = new Blob([store.exportStore()], { type: "application/json" });
         const a = h("a", { href: URL.createObjectURL(blob), download: "is-lit-review-export.json" });
         document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
-      } }, "Export data (JSON)"),
+      } }, "Export data (JSON — no API keys)"),
     h("button", { class: "stream-add", style: { borderTop: "none", color: "var(--muted)", fontWeight: 400 },
       onclick: () => file.click() }, "Import data (JSON)"),
+    store.hasImportBackup() && h("button", {
+      class: "stream-add", style: { borderTop: "none", color: "var(--muted)", fontWeight: 400 },
+      onclick: () => {
+        if (!confirm("Restore the workspace as it was before the last import? The imported data will be discarded.")) return;
+        try { store.restoreImportBackup(); location.reload(); }
+        catch (err) { toast("Restore failed: " + err.message); }
+      } }, "Restore pre-import backup"),
     file);
 }
 
@@ -157,8 +195,14 @@ function nav(stream) {
             disabled: m !== "main" && !ready,
             onclick: () => actions.goMode(m) }, label))),
       h("div", { class: "nav-spacer" }),
-      h("div", { class: "privacy" }, h("span", { class: "dot" }), "Activity stays private"),
-      h("button", { class: "nav-btn", title: "Preferences",
+      h("div", { class: "privacy",
+        title: "Your research activity — questions, streams, results — is stored only in this browser. " +
+          "AI requests (your question + researcher profile) go directly to the provider you chose, with your key. " +
+          "Production pages load Google Analytics for anonymous page-view stats." },
+        h("span", { class: "dot" }), "Research data stays in this browser"),
+      h("button", { class: "nav-btn nav-help", title: "How this works — take the quick tour",
+        onclick: () => startTour(ctx()) }, "?"),
+      h("button", { class: "nav-btn nav-prefs", title: "Preferences",
         onclick: () => { app.prefsOpen = true; render(); } },
         `${initial} · Preferences`),
       themeButton()));
@@ -182,16 +226,33 @@ function arrows(stream) {
   ];
 }
 
+// Escape works no matter where focus sits (document-level listener; re-added
+// idempotently on each render, removed when the modal closes).
+let prefsKeyHandler = null;
+function setPrefsKeyHandler(fn) {
+  if (prefsKeyHandler) document.removeEventListener("keydown", prefsKeyHandler);
+  prefsKeyHandler = fn;
+  if (fn) document.addEventListener("keydown", fn);
+}
+
 function prefsModal() {
+  // Backdrop click and Escape both go through the dirty check — dismissing
+  // the modal must never silently discard edits.
+  const tryClose = () => {
+    if (api.isDirty() && !confirm("Discard unsaved preference changes?")) return;
+    app.prefsOpen = false; render();
+  };
   const overlay = h("div", { class: "modal-overlay",
-    onclick: (e) => { if (e.target === overlay) { app.prefsOpen = false; render(); } } });
-  const wrap = h("div", {});
+    onclick: (e) => { if (e.target === overlay) tryClose(); } });
+  const wrap = h("div", { role: "dialog", "aria-modal": "true", "aria-label": "Preferences" });
   overlay.append(wrap);
-  renderOnboard(wrap, {
+  const api = renderOnboard(wrap, {
     mode: "edit",
     onDone: () => { app.prefsOpen = false; toast("Preferences saved"); render(); },
-    onCancel: () => { app.prefsOpen = false; render(); },
+    onCancel: tryClose,
   });
+  setPrefsKeyHandler((e) => { if (e.key === "Escape") tryClose(); });
+  requestAnimationFrame(() => wrap.querySelector("input, select, textarea, button")?.focus());
   return overlay;
 }
 
@@ -205,12 +266,14 @@ function render() {
         app.screen = "app";
         if (!store.listStreams().length) store.createStream("Untitled review stream");
         render();
+        if (!store.isTourSeen()) startTour(ctx()); // first run → offer the tour
       },
     });
     return;
   }
   const stream = currentStream();
   const c = ctx();
+  if (!app.prefsOpen) setPrefsKeyHandler(null);
   root.replaceChildren(...[
     nav(stream),
     ...arrows(stream),
@@ -225,21 +288,18 @@ function render() {
 // changes on an already-running app — receive those live, without a reload.
 function receiveHandoff({ rerender = false } = {}) {
   const rec = parseInbound(location.hash);
-  if (!rec) return;
+  if (!rec) return false;
   history.replaceState(null, "", location.pathname + location.search);
   const row = store.addSession(rec);
-  toast(`Received ${row.papers.length} papers from ${row.tool} — see Outside IS → Import`);
-  if (app.screen === "app") {
-    const s = currentStream();
-    runFor(s.id).outsideTab = "ext"; // land the user on the import tab
-    if (rerender) {
-      app.mode = "main";
-      render();
-      document.querySelector(".zone-os")?.scrollIntoView({ behavior: "smooth" });
-    }
+  toast(`Received ${row.papers.length} papers from ${row.tool} — see External tools under Outside IS`);
+  if (app.screen === "app" && rerender) {
+    app.mode = "main";
+    render();
+    document.querySelector(".ext-card")?.scrollIntoView({ block: "center" });
   }
+  return true;
 }
-receiveHandoff();
+const bootHandoff = receiveHandoff();
 window.addEventListener("hashchange", () => receiveHandoff({ rerender: true }));
 
 // Another app tab changed the store (captured session, finished review, edited
@@ -256,3 +316,9 @@ fetch((import.meta.env.BASE_URL || "./") + "data/status.json")
   .catch(() => { /* stats card shows placeholders */ });
 
 render();
+// A fresh tab opened by the extension: after the boot render (which already
+// restored the last active stream), bring the External-tools panel into view.
+if (bootHandoff && app.screen === "app") {
+  requestAnimationFrame(() =>
+    document.querySelector(".ext-card")?.scrollIntoView({ block: "center" }));
+}

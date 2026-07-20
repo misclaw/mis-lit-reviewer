@@ -61,11 +61,11 @@ export async function refineQuery({ query, profile, prefs, provider, key, model 
     model,
     maxTokens: 1200,
     system:
-      "You refine research questions for semantic search over an Information Systems (IS) literature corpus " +
-      "(titles + abstracts, embedded with a sentence encoder). Reduce ambiguity, resolve acronyms, and surface synonyms. " +
-      "Reply with JSON only: {\"refined_query\": string, \"expansions\": string[]} — refined_query is a single dense " +
-      "phrasing of the question using field vocabulary; expansions are up to 3 alternative full phrasings that substitute " +
-      "key terms with synonyms or neighboring constructs (each must stand alone as a search query).",
+      "Refine a research question for semantic search over an academic corpus (titles + abstracts). " +
+      "Reduce ambiguity, resolve acronyms, add synonyms. " +
+      "Reply with JSON only: {\"refined_query\": string, \"expansions\": string[]} — refined_query is one dense " +
+      "phrasing of the question; expansions are up to 3 alternative phrasings that swap key terms for synonyms " +
+      "(each must stand alone as a search query).",
     user: `${profileBlurb(profile, prefs)}\n\nResearch question: ${query}`,
   });
   const refined = typeof out.refined_query === "string" && out.refined_query.trim() ? out.refined_query.trim() : query;
@@ -91,12 +91,11 @@ export async function rerank({ query, refined, candidates, profile, prefs, provi
     model,
     maxTokens: 6000,
     system:
-      "You are screening candidate papers for a literature review in Information Systems, following Webster & Watson (2002). " +
-      `Given a research question and ${candidates.length} candidates (pre-filtered by embedding similarity), select and rank the ${n} most relevant. ` +
-      "Judge by conceptual relevance to the question — theory, constructs, phenomenon, and method fit — not by citation count alone. " +
+      `From the ${candidates.length} candidate papers, select and rank the ${n} most relevant to the research question. ` +
+      "Judge by conceptual fit — theory, constructs, phenomenon, method — not by citation count. " +
       "Reply with JSON only: {\"picks\": [{\"i\": <candidate index>, \"summary\": <one-line summary of the paper itself>, " +
       "\"rationale\": <one sentence on why it matters for THIS question>}]} " +
-      `— exactly ${n} picks (fewer only if fewer are genuinely relevant), ordered most relevant first.`,
+      `— exactly ${n} picks (fewer only if fewer are genuinely relevant), most relevant first.`,
     user: `${profileBlurb(profile, prefs)}\n\nResearch question: ${query}\nRefined phrasing: ${refined}\n\nCandidates:\n\n${listing}`,
   });
   const picks = Array.isArray(out.picks) ? out.picks : [];
@@ -135,14 +134,12 @@ export function prestigeSort(results, prefs) {
 // "Search prompt"). {n} is substituted with the requested paper count; the
 // researcher profile + research question are always appended as the user turn.
 export const OUTSIDE_PROMPT_DEFAULT =
-  "You help an Information Systems (IS) scholar look OUTSIDE the IS discipline, per Webster & Watson (2002): " +
-  "IS is interdisciplinary, so reviews must also draw on reference disciplines (management, psychology, HCI, economics, " +
-  "marketing, computer science, operations…). Use your web search tool to find real, verifiable academic papers from " +
-  "OUTSIDE the core IS journals/conferences that bear on the research question. Never invent papers — every entry must " +
-  "come from something you actually found. Reply with JSON only:\n" +
+  "Use your web search tool to find real, verifiable academic papers relevant to the research question, " +
+  "from outside the core Information Systems (IS) journals and conferences. Never invent a paper — every entry " +
+  "must come from something you actually found. Reply with JSON only:\n" +
   "{\"papers\": [{\"title\": str, \"authors\": str, \"venue\": str, \"year\": int, \"discipline\": str, " +
   "\"url\": str, \"doi\": str|null, \"summary\": <one-line summary>, \"rationale\": <why it matters for this question>}]}\n" +
-  "— up to {n} papers, most relevant first. Prefer highly-cited foundational work plus recent developments.";
+  "— up to {n} papers, most relevant first.";
 
 export async function searchOutside({ query, profile, prefs, provider, key, model, prompt }, n = 8) {
   const system = (prompt && prompt.trim() ? prompt : OUTSIDE_PROMPT_DEFAULT).replaceAll("{n}", String(n));
@@ -288,9 +285,8 @@ export async function describeImports({ papers, query, profile, prefs, provider,
     model,
     maxTokens: 4000,
     system:
-      "An Information Systems scholar imported these papers from an external literature tool into their review. " +
-      "For each paper, write a one-line summary of the paper itself and one sentence on why it matters for the " +
-      "research question (its discipline lens, construct, or finding). Also name the paper's home discipline. " +
+      "A researcher imported these papers into a literature review. For each paper, write a one-line summary of " +
+      "the paper itself, one sentence on why it matters for the research question, and name its home discipline. " +
       "Reply with JSON only: {\"items\": [{\"i\": <index>, \"summary\": str, \"rationale\": str, \"discipline\": str}]} " +
       "— one item per paper, same indices.",
     user: `${profileBlurb(profile, prefs)}\n\nResearch question: ${query}\n\nImported papers:\n\n${listing}`,
