@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — Paper Trails</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 720px; margin: 0 auto; padding: 48px 20px 80px;
+    line-height: 1.65; color: #201d17; background: #faf8f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e8e4da; background: #191713; }
+    a { color: #c9a35f; }
+  }
+  h1 { font-family: Georgia, serif; font-size: 30px; margin-bottom: 4px; }
+  h2 { font-family: Georgia, serif; font-size: 20px; margin-top: 36px; }
+  .date { color: #8a8374; font-size: 14px; }
+  a { color: #9c6b1c; }
+  li { margin: 6px 0; }
+</style>
+</head>
+<body>
+<h1>Privacy</h1>
+<p class="date">Paper Trails &amp; Paper Trails Bridge · Effective 2026-07-20</p>
+
+<p>Paper Trails is a literature-review workbench for Information Systems
+scholars. This page covers the web app (mis-lit-reviewer.misclaw.app), the
+Mac app, and the <strong>Paper Trails Bridge</strong> browser extension.</p>
+
+<h2>The browser extension collects nothing</h2>
+<p>Paper Trails Bridge has no server, no analytics, and no storage. When you
+click its button on a supported search site (Google Scholar, Asta, Paper
+Digest, SciSpace), it reads the paper list visible on that page and opens
+Paper Trails with those results encoded in the URL fragment. URL fragments
+are processed inside your browser and are never transmitted over the
+network, so the results travel directly from one of your tabs to another.
+The extension does nothing until you click it, and it sends nothing to us
+or to anyone else.</p>
+
+<h2>Your research data stays with you</h2>
+<p>By default, everything you do in Paper Trails — research questions, review
+streams, imported sessions, preferences — is stored only in your browser
+(localStorage). We run no server that receives it.</p>
+<p>If you create an optional sync account, that same workspace is stored in a
+private database row (hosted on Supabase) that only your authenticated
+account can read or write, so you can use Paper Trails on multiple devices.
+You can stop syncing at any time by signing out; your local copy stays with
+you. To delete the cloud copy, contact us (below).</p>
+
+<h2>API keys never leave your browser</h2>
+<p>LLM API keys you add (Anthropic, OpenAI, Google) are stored only in your
+browser and sent only to the provider they belong to, with your requests.
+They are excluded from account sync and from data exports.</p>
+
+<h2>AI requests</h2>
+<p>When you run a review or web search, your research question and researcher
+profile are sent directly from your browser to the LLM provider you chose,
+using your own key, under that provider's privacy terms. We are not in that
+path.</p>
+
+<h2>Analytics</h2>
+<p>Production pages of the web app load Google Analytics for anonymous,
+aggregate page-view statistics. No research content, workspace data, or API
+keys are sent to analytics. The browser extension contains no analytics.</p>
+
+<h2>Contact</h2>
+<p>Questions, or a request to delete a sync account and its data:
+<a href="mailto:gwonedgar@gmail.com">gwonedgar@gmail.com</a>. The project is
+open source: <a href="https://github.com/misclaw/mis-lit-reviewer">github.com/misclaw/mis-lit-reviewer</a>.</p>
+</body>
+</html>
