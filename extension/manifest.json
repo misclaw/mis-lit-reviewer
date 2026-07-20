@@ -8,7 +8,7 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "description": "Bridges searches on Google Scholar (Labs), Asta, Paper Digest, and SciSpace into Paper Trails — the Backward · Main · Forward IS literature review workbench.",
+  "description": "Send results from Google Scholar, Asta, Paper Digest, and SciSpace into Paper Trails, the IS literature review workbench.",
   "browser_specific_settings": {
     "gecko": {
       "id": "paper-trails-bridge@misclaw.app",
