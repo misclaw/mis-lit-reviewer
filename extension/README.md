@@ -11,7 +11,7 @@ Bridges searches you run on general literature tools into the
 On a supported site, a floating **"◀ · ▶ Send to Paper Trails"** button
 appears. Clicking it detects the source, your query, and the visible paper
 list (with snippets/rationales when the tool shows them), then opens
-`mis-lit-reviewer.misclaw.app` with the session encoded in the URL fragment
+`paper-trails.misclaw.app` with the session encoded in the URL fragment
 (`#import=base64url(JSON)`). Nothing is sent to any server — the data travels
 inside the URL, from one tab to another, and lands in the workbench's
 local-only store. The Import tab there lets you merge it into a review stream.

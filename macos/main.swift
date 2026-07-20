@@ -2,7 +2,7 @@
 // workbench. With account sync (⇅ in the app's top bar) the workspace follows
 // the user between this app and any browser.
 //
-//   • Loads https://mis-lit-reviewer.misclaw.app (override: PT_URL env var,
+//   • Loads https://paper-trails.misclaw.app (override: PT_URL env var,
 //     e.g. PT_URL=http://localhost:5174 for development)
 //   • localStorage / IndexedDB / auth tokens persist in the default website
 //     data store, so streams, keys, and the signed-in session survive relaunch
@@ -11,7 +11,7 @@
 import Cocoa
 import WebKit
 
-let APP_URL = ProcessInfo.processInfo.environment["PT_URL"] ?? "https://mis-lit-reviewer.misclaw.app/"
+let APP_URL = ProcessInfo.processInfo.environment["PT_URL"] ?? "https://paper-trails.misclaw.app/"
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
   var window: NSWindow!

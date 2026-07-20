@@ -98,21 +98,39 @@ export function accountModal({ onClose, onSignedIn } = {}) {
       if (!e || p.length < 6) { err.textContent = "Enter your email and a password of at least 6 characters."; return; }
       busy = kind; paint();
       try {
-        if (kind === "up") await sync.signUp(e, p);
-        else await sync.signIn(e, p);
+        if (kind === "up") {
+          const { needsConfirmation } = await sync.signUp(e, p);
+          if (needsConfirmation) { busy = null; draft.confirmSent = e; paint(); return; }
+          // no confirmation required (autoconfirm) — fall through to wait for link
+        } else {
+          await sync.signIn(e, p);
+        }
         // now wait for the engine to link — the onState hook above closes the loop
       } catch (ex) {
         busy = null; paint();
-        card.querySelector(".acct-err").textContent =
-          (kind === "up" ? "Could not create the account — " : "Could not sign in — ") + ex.message;
+        const notConfirmed = /not confirmed/i.test(ex.message);
+        card.querySelector(".acct-err").textContent = notConfirmed
+          ? "Please confirm your email first — click the link we sent, then sign in."
+          : (kind === "up" ? "Could not create the account — " : "Could not sign in — ") + ex.message;
       }
     };
 
     // h() flattens nested child arrays; raw replaceChildren does not
     card.replaceChildren(h("div", {},
       h("div", { class: "onb-h" }, "Account & sync"),
-      !st.user
-        ? [
+      !st.user ? draft.confirmSent
+        ? [ // post-signup: waiting for the emailed confirmation link
+            h("div", { class: "onb-sub" },
+              "Almost there — we emailed a confirmation link to ",
+              h("strong", {}, draft.confirmSent),
+              ". Click it to activate your account, then sign in here. " +
+              "(Check spam if it's not in your inbox within a minute.)"),
+            h("div", { class: "acct-actions" },
+              h("button", { class: "btn-ink",
+                onclick: () => { draft.confirmSent = null; draft.pass = ""; paint(); } }, "Back to sign in"),
+              h("button", { class: "btn", onclick: close }, "Close")),
+          ]
+        : [
             h("div", { class: "onb-sub" },
               "Optional. One free account keeps your review streams, imported sessions, and preferences in sync on every device — browser or Mac app. ",
               h("strong", {}, "API keys never sync"), " — they stay in each browser you enter them in."),
@@ -126,7 +144,8 @@ export function accountModal({ onClose, onSignedIn } = {}) {
                 busy === "up" ? "Creating…" : "Create account"),
               h("button", { class: "btn", onclick: close }, "Close")),
             h("div", { class: "acct-note" },
-              "No email verification is sent, and there is no password reset yet — keep the password in a password manager. " +
+              "Creating an account emails you a confirmation link — click it, then sign in. " +
+              "Keep your password in a password manager (there's no reset yet). " +
               "Sync stores your research data (never keys) in a private row only your account can read."),
           ]
         : [

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Paper Trails Bridge",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -32,6 +32,7 @@
     },
     {
       "matches": [
+        "https://paper-trails.misclaw.app/*",
         "https://mis-lit-reviewer.misclaw.app/*",
         "http://localhost:5173/*"
       ],

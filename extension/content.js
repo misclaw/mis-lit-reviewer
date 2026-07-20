@@ -10,7 +10,7 @@
 // Alt-click (⌥-click) the button to send to http://localhost:5173 instead of
 // the production app (for local development).
 (() => {
-  const APP_URL = "https://mis-lit-reviewer.misclaw.app/";
+  const APP_URL = "https://paper-trails.misclaw.app/";
   const DEV_URL = "http://localhost:5173/";
   const MAX_PAPERS = 40;
 

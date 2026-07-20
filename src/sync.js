@@ -31,7 +31,10 @@ function set(patch) {
 export async function signUp(email, password) {
   const { data, error } = await supabase.auth.signUp({ email, password });
   if (error) throw new Error(error.message);
-  return data.user;
+  // With email confirmation on, signUp returns a user but NO session — the
+  // account isn't usable until the emailed link is clicked. needsConfirmation
+  // tells the UI to show "check your email" instead of waiting for a session.
+  return { user: data.user, needsConfirmation: !data.session };
 }
 export async function signIn(email, password) {
   const { error } = await supabase.auth.signInWithPassword({ email, password });

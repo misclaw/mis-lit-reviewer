@@ -13,8 +13,9 @@ cd extension && rm -f ../paper-trails-bridge.zip && zip -qr ../paper-trails-brid
 npx addons-linter ../paper-trails-bridge.zip   # expect 0 errors / 0 warnings
 ```
 
-Current version: **0.5.1**. Privacy policy URL (same for both stores):
-**https://mis-lit-reviewer.misclaw.app/privacy**
+Current version: **0.5.2**. Privacy policy URL (same for both stores):
+**https://paper-trails.misclaw.app/privacy** (also resolves at the former
+alias https://mis-lit-reviewer.misclaw.app/privacy).
 
 Screenshots (1280×800 JPEG) are in `../store-assets/`; suggested order:
 `1-scholar-button` → `2-session-received` → `4-imported-collection` → `3-workbench`.
@@ -34,7 +35,7 @@ Store icon: `icons/icon128.png` (128×128).
 
 > Paper Trails Bridge connects the literature-search tools you already use to
 > **Paper Trails** — a Backward · Main · Forward literature-review workbench for
-> Information Systems scholars (mis-lit-reviewer.misclaw.app).
+> Information Systems scholars (paper-trails.misclaw.app).
 >
 > On a supported search site — Google Scholar / Scholar Labs, Asta (Ai2), Paper
 > Digest, or SciSpace — a floating "◀ · ▶ Send to Paper Trails" button appears.
@@ -56,7 +57,7 @@ Store icon: `icons/icon128.png` (128×128).
   > Trails" button on a supported academic search site (Google Scholar / Scholar
   > Labs, Asta, Paper Digest, SciSpace), it reads the list of papers visible on
   > that page and opens the Paper Trails literature-review web app
-  > (mis-lit-reviewer.misclaw.app) in a tab, with those results encoded in the
+  > (paper-trails.misclaw.app) in a tab, with those results encoded in the
   > URL fragment, so the user can import them into their review workspace. It has
   > no other features: no background activity, no browsing monitoring, no data
   > storage, no tracking. It acts only on the user's explicit click.
@@ -67,8 +68,9 @@ Store icon: `icons/icon128.png` (128×128).
   > the "Send to Paper Trails" button and — only when the user clicks it — reads
   > the visible search-result list (paper titles, authors, links, snippets). This
   > is the extension's entire function and requires access to those pages' DOM.
-  > The remaining host, mis-lit-reviewer.misclaw.app (plus localhost:5173 for
-  > development of the same app), runs a one-line script that stamps the
+  > The remaining app hosts — paper-trails.misclaw.app and its former alias
+  > mis-lit-reviewer.misclaw.app (plus localhost:5173 for development of the
+  > same app) — run a one-line script that stamps the
   > extension's version on the page so the app's "Verify installation" button can
   > detect it; it reads nothing from the page. All data transfer happens inside
   > the user's browser via the URL fragment of a tab opened by the user's click —
@@ -95,7 +97,7 @@ Submit at https://addons.mozilla.org → Developer Hub → Submit a New Add-on �
 - **Summary:** Send results from Google Scholar, Asta, Paper Digest, and SciSpace into Paper Trails, the IS literature-review workbench.
 - **Description:** reuse the detailed description above (AMO has no 132-char cap).
 - **Categories:** Other / Productivity (search-tools adjacent)
-- **Privacy policy:** https://mis-lit-reviewer.misclaw.app/privacy
+- **Privacy policy:** https://paper-trails.misclaw.app/privacy
 - **Source code submission:** **No** — there is no build step, minifier, or
   bundler; the uploaded files are the original sources (also on GitHub).
 - The manifest already carries the AMO essentials: `browser_specific_settings.
