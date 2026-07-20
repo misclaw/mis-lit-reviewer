@@ -85,6 +85,17 @@ export function recommendersOf(p) {
   return Array.isArray(p.recommenders) ? p.recommenders : [];
 }
 
+// Distinct provenance CHANNELS a paper reached us through: each recommending
+// model (e.g. "Claude (Opus 4.8)") plus each named import tool (SciSpace,
+// Google Scholar, …). The generic "Web search" tag is not itself a channel —
+// the model behind it is. A paper surfaced by two models, or by one model and
+// an import tool, is "cross-channel" (channelsOf(p).length > 1) — corroborated
+// from independent places, so it sorts to the top and gets highlighted.
+export function channelsOf(p) {
+  const tools = sourcesOf(p).filter((s) => s !== "Web search");
+  return [...new Set([...recommendersOf(p), ...tools])];
+}
+
 // Merge b into a: keep the richest value per field, union the sources.
 // When two models surfaced the same paper we keep ONE summary/rationale (the
 // richer of the two — `longer`) and union the recommender list.

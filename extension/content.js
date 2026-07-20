@@ -84,6 +84,44 @@
     return out;
   }
 
+  // SciSpace — its literature-review results render as a two-column table:
+  // column 1 is the paper (a "N. Title" link to /papers/…, a doi.org link,
+  // authors + date), column 2 is SciSpace's per-paper "Insight". We grab the
+  // title, DOI, year, and that insight (as the snippet). The insight column
+  // fills in asynchronously, so it's best-effort — but title+DOI is always
+  // enough for the app's OpenAlex/Semantic Scholar resolution to complete the
+  // record. Falls through to the generic extractor if the table isn't found.
+  function extractSciSpace() {
+    const out = [];
+    const seen = new Set();
+    for (const tr of document.querySelectorAll("table tr")) {
+      const titleA = tr.querySelector('a[href*="/papers/"]');
+      const doiA = tr.querySelector('a[href*="doi.org"]');
+      if (!titleA && !doiA) continue; // header row / non-result row
+      const cells = tr.children;
+      // SciSpace prefixes the title link with its rank ("1. …") — strip it.
+      const title = clean(titleA?.textContent).replace(/^\d+[.)]\s*/, "");
+      const doiHref = doiA?.href || "";
+      const doi = doiOf(doiHref);
+      const url = doiHref || titleA?.href || "";
+      const key = "u:" + (doi || url || title);
+      if (!url && !title) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // The last cell is the Insights column; ignore it if it's just echoing
+      // the title or is still empty (not yet loaded).
+      const insight = cells.length > 1 ? clean(cells[cells.length - 1].textContent) : "";
+      out.push({
+        title,
+        url,
+        doi: doi || undefined,
+        year: yearOf(clean(cells[0]?.textContent)),
+        snippet: insight && insight !== title ? insight.slice(0, 500) : "",
+      });
+    }
+    return out;
+  }
+
   // Generic fallback: scholarly-looking links anywhere on the page.
   // Links whose anchor text is a plausible title become full records; links
   // that only carry an identifier (a doi.org href with "[1]" or an icon as
@@ -125,6 +163,7 @@
     try {
       if (tool.startsWith("Google Scholar")) papers = extractScholar();
       else if (tool === "Paper Digest") papers = extractPaperDigest();
+      else if (tool === "SciSpace") papers = extractSciSpace();
     } catch (e) { /* adapter drift — fall through */ }
     if (papers.length < 2) {
       const generic = extractGeneric();

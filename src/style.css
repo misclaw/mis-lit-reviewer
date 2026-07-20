@@ -130,9 +130,13 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 /* Outside-IS multi-select model chips */
 .chip.multi { display: inline-flex; align-items: center; gap: 6px; }
 .chip.multi .tick { font-size: 12px; opacity: 0.9; }
-.chip.multi.nokey { opacity: 0.55; cursor: not-allowed; border-style: dashed; }
-.chip.multi.nokey:hover { border-color: var(--input-border); }
-.chip.multi .nokey-tag { font-size: 11px; color: var(--faint); font-weight: 400; }
+/* A provider with no key is disabled (non-clickable) — single- and multi-select
+   alike: dashed, dimmed, and it ignores hover so it clearly reads as inert. */
+.chip.nokey { display: inline-flex; align-items: center; gap: 6px; opacity: 0.55; cursor: not-allowed; border-style: dashed; }
+.chip.nokey:hover { border-color: var(--input-border); }
+.chip:disabled { cursor: not-allowed; }
+.chip .nokey-tag { font-size: 11px; color: var(--faint); font-weight: 400; }
+.wi-nokey-note { font-size: 13px; color: var(--wi-sub); margin: 10px 0 0; }
 .os-model-picks { display: flex; flex-wrap: wrap; gap: 12px 16px; margin: 12px 0 0; }
 .os-model-pick { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--os-sub); }
 .os-model-pick .mp-name { font-weight: 600; }
@@ -294,6 +298,23 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 }
 .stage-err.banner { margin-top: 12px; border: 1px solid var(--danger); font-weight: 600; }
 
+/* live "N papers being reviewed" progress line — a moving counter the user can
+   watch while a batch is fetched/resolved, so the wait reads as real work */
+.progress-banner {
+  display: flex; align-items: center; gap: 10px; margin-top: 14px; max-width: 640px;
+  font-size: 13.5px; font-weight: 600; color: var(--wi-head);
+  background: var(--wi-soft); border: 1px solid var(--wi-border);
+  border-radius: 999px; padding: 9px 16px; animation: fadeUp 0.3s ease;
+}
+.progress-banner.os { color: var(--os-head); background: var(--os-soft); border-color: var(--os-border); }
+.progress-text { min-width: 0; overflow-wrap: anywhere; }
+.progress-spin {
+  flex: none; width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid var(--wi-accent); border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+.progress-spin.os { border-color: var(--os-accent); border-top-color: transparent; }
+
 /* refined-query line */
 .refined-line { margin-top: 12px; font-size: 13px; color: var(--wi-sub); }
 .refined-line em, .refined-line strong { color: var(--wi-head); }
@@ -327,6 +348,23 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 .p-foot { font-size: 12px; margin-top: 8px; display: flex; gap: 14px; flex-wrap: wrap; }
 .paper-card.wi .p-foot { color: var(--wi-faint); }
 .paper-card.os .p-foot { color: var(--os-faint); }
+
+/* cross-channel papers — corroborated by 2+ models / import tools. They sort to
+   the top of the collection and get a stronger accent border + a labelled
+   ribbon naming the channels (which model / which tool). */
+.paper-card.cross {
+  border-color: var(--os-accent); border-width: 2px;
+  box-shadow: 0 0 0 3px var(--os-soft);
+}
+.cross-ribbon {
+  display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px;
+  font-size: 12px; font-weight: 600; line-height: 1.35;
+  color: var(--os-head); background: var(--os-soft);
+  border: 1px solid var(--os-border); border-radius: 6px; padding: 5px 9px;
+  overflow-wrap: anywhere;
+}
+.cross-ribbon .cx-dot { flex: none; color: var(--os-accent); }
+.cross-ribbon strong { color: var(--os-accent); font-weight: 700; }
 
 /* prestige toggle */
 .prestige-btn {

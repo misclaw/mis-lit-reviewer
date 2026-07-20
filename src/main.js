@@ -32,8 +32,8 @@ const app = {
 function runFor(id) {
   if (!app.runs.has(id)) {
     app.runs.set(id, {
-      isRunning: false, isStage: 0, isError: null, refineNote: null,
-      outRunning: false, outStage: 0, outError: null,
+      isRunning: false, isStage: 0, isError: null, refineNote: null, isProgress: null,
+      outRunning: false, outStage: 0, outError: null, outProgress: null,
       graph: { back: { running: false, stage: 0, error: null, sel: null },
                fwd: { running: false, stage: 0, error: null, sel: null } },
     });

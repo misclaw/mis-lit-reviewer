@@ -10,7 +10,7 @@ import {
   refineQuery, similarityFilter, rerank, prestigeSort, searchOutside, resolvePapers,
   describeImports, venuePub, VENUES, OUTSIDE_PROMPT_DEFAULT,
 } from "./pipeline.js";
-import { dedupeInto, dropWithinOverlap, sourcesOf, recommendersOf } from "./dedupe.js";
+import { dedupeInto, dropWithinOverlap, sourcesOf, recommendersOf, channelsOf } from "./dedupe.js";
 
 function savePrefs(patch) {
   store.saveOnboarding(store.getProfile(), { ...store.getPrefs(), ...patch });
@@ -30,6 +30,10 @@ function selectedOutsideProviders(prefs) {
   return keyed.filter((p) => prefs.outsideProviders.includes(p));
 }
 const osModelFor = (prefs, p) => resolveModel(p, prefs.models?.os?.[p]);
+// Human label naming BOTH the provider and the exact model tier that did the
+// work, e.g. "Claude (Opus 4.8)" — provenance should say WHICH model searched,
+// never a vague "Web search".
+const modelChannel = (prefs, p) => `${PROVIDERS[p].label} (${modelLabel(p, osModelFor(prefs, p))})`;
 
 // Provider chips + model dropdown. zone: "wi" | "os" — each zone keeps its
 // own provider AND its own per-provider model choice (e.g. Opus for the
@@ -44,17 +48,20 @@ function pickerRow(ctx, zone) {
   const model = zoneModel(prefs, zone);
   return h("div", { class: `provider-row ${zone}` },
     h("div", { class: "lab" }, zone === "wi" ? "Reviewer:" : "Provider:"),
+    // Single-select, but — like the Outside-IS picker — a provider with no key
+    // is disabled (non-clickable). If NONE are keyed, every chip is disabled.
     Object.keys(PROVIDERS).map((p) => {
       const has = !!prefs.keys[p]?.trim();
       return h("button", {
-        class: `chip${p === prov ? " on " + zone : ""}`,
+        class: `chip${p === prov ? " on " + zone : ""}${has ? "" : " nokey"}`,
         "aria-pressed": String(p === prov),
-        title: has ? "" : "no key configured — add one in Preferences",
-        onclick: () => {
+        disabled: !has,
+        title: has ? "" : `Add a ${PROVIDERS[p].label} key in Preferences to use it`,
+        onclick: has ? () => {
           savePrefs(zone === "wi" ? { provider: p } : { outsideProvider: p });
           ctx.rerender();
-        },
-      }, PROVIDERS[p].label + (has ? "" : " ∅"));
+        } : null,
+      }, PROVIDERS[p].label, has ? null : h("span", { class: "nokey-tag" }, "no key"));
     }),
     h("select", { class: "model-select",
       "aria-label": (zone === "wi" ? "Within-IS" : "Outside-IS") + " model",
@@ -133,9 +140,9 @@ const IS_STAGES = [
   ["LLM reranking with rationales", "Top 100 → 20 papers, each with a relevance rationale"],
 ];
 const OUT_STAGES = (label) => [
-  [`Searching with ${label} + web-search`,
-    "Each model searches the web in parallel for papers beyond the IS corpus"],
-  ["Merging & enriching results", "De-duplicating across models, metadata + citations via OpenAlex, dropping IS-corpus overlaps"],
+  [`Searching with ${label}`,
+    "Each model searches the scholarly web in parallel, with its web-search tool enabled"],
+  ["Merging & enriching results", "De-duplicating across models, fetching metadata + citations via OpenAlex, dropping papers already in your within-IS set"],
 ];
 
 // ---- pipeline actions ----
@@ -164,7 +171,7 @@ export async function runReview(ctx, query) {
   // Only the query (and an auto-name) persist now — the previous review's
   // results stay in the store until the new run SUCCEEDS, so a failed run
   // never destroys finished work.
-  run.isRunning = true; run.isStage = 1; run.isError = null; run.refineNote = null;
+  run.isRunning = true; run.isStage = 1; run.isError = null; run.refineNote = null; run.isProgress = null;
   const patch = { query };
   if (/^Untitled/i.test(ctx.stream.name)) {
     patch.name = query.length > 48 ? query.slice(0, 48) + "…" : query;
@@ -184,21 +191,25 @@ export async function runReview(ctx, query) {
       if (isAuthError(e)) throw new Error(e.message + " — the API key was rejected; check it in Preferences");
       run.refineNote = "refinement unavailable (" + e.message + ") — searched with the original phrasing";
     }
-    run.isStage = 2; rerender();
+    run.isStage = 2;
+    run.isProgress = "Scanning the embedded IS corpus for the closest candidates…";
+    rerender();
 
     // 2 — similarity filtering
     const candidates = await similarityFilter({ query, refined, expansions }, 100);
     if (!candidates.length) throw new Error("no candidates found in the corpus");
-    run.isStage = 3; rerender();
+    run.isStage = 3;
+    run.isProgress = `${candidates.length} candidate papers found — ${modelLabel(provider, model)} is re-ranking them to the 20 most relevant…`;
+    rerender();
 
     // 3 — LLM rerank with rationales; backward/forward belong to the old
     // main set, so they reset only here, together with its replacement
     const within = await rerank({ query, refined, candidates, profile, prefs, provider, key, model }, 20);
     store.updateStream(streamId, { refined, expansions, within, backward: null, forward: null });
-    run.isRunning = false; run.isStage = 0;
+    run.isRunning = false; run.isStage = 0; run.isProgress = null;
   } catch (e) {
     console.error(e);
-    run.isRunning = false; run.isStage = 0;
+    run.isRunning = false; run.isStage = 0; run.isProgress = null;
     run.isError = isAuthError(e) ? e.message + " — the API key was rejected; check it in Preferences" : e.message;
   }
   rerender();
@@ -213,11 +224,14 @@ export async function runOutside(ctx, query) {
   const profile = store.getProfile();
 
   run.outRunning = true; run.outStage = 1; run.outError = null;
+  run.outProgress = `${providers.length} model${providers.length === 1 ? "" : "s"} searching the scholarly web in parallel — ` +
+    providers.map((p) => modelChannel(prefs, p)).join(", ");
   rerender();
   try {
     // Fan out: every selected model searches the web in parallel. Each result
-    // is tagged with the model that recommended it; when the same paper comes
-    // back from several models, dedupeInto (via mergePapers) unions those tags.
+    // is tagged with the exact model that recommended it (e.g. "Claude (Opus
+    // 4.8)"); when the same paper comes back from several models, dedupeInto
+    // (via mergePapers) unions those tags — that's what makes it cross-channel.
     const settled = await Promise.allSettled(providers.map((p) =>
       searchOutside({
         query, profile, prefs, provider: p, key: prefs.keys[p],
@@ -225,11 +239,13 @@ export async function runOutside(ctx, query) {
       }, 8)));
     const found = [];
     const errors = [];
+    const okModels = [];
     providers.forEach((p, i) => {
       const r = settled[i];
       if (r.status === "fulfilled") {
+        okModels.push(modelChannel(prefs, p));
         for (const paper of r.value) {
-          found.push({ ...paper, sources: ["Web search"], recommenders: [PROVIDERS[p].label] });
+          found.push({ ...paper, sources: ["Web search"], recommenders: [modelChannel(prefs, p)] });
         }
       } else {
         errors.push(`${PROVIDERS[p].label}: ${r.reason?.message || r.reason}`);
@@ -238,6 +254,8 @@ export async function runOutside(ctx, query) {
     if (!found.length) throw new Error(errors.join(" · ") || "no papers found");
 
     run.outStage = 2;
+    run.outProgress = `${found.length} paper${found.length === 1 ? "" : "s"} returned by ${okModels.join(", ")} — ` +
+      "de-duplicating and resolving metadata + citations…";
     // A fresh web search replaces the previous LLM findings; imported papers
     // (any record whose sources go beyond "Web search") stay in the collection.
     // The replacement happens only now, AFTER at least one model succeeded — a
@@ -246,13 +264,13 @@ export async function runOutside(ctx, query) {
     const keptImports = prevOutside.filter((p) => sourcesOf(p).some((s) => s !== "Web search"));
     store.updateStream(streamId, { outside: keptImports, outsideStats: null });
     rerender();
-    await integrateOutside(ctx, found);
-    run.outRunning = false; run.outStage = 0;
+    await integrateOutside(ctx, found, "papers from the web search");
+    run.outRunning = false; run.outStage = 0; run.outProgress = null;
     // Some models succeeded, some didn't — surface it without failing the run.
     if (errors.length) toast("Some models couldn't search — " + errors.join("; "));
   } catch (e) {
     console.error(e);
-    run.outRunning = false; run.outStage = 0; run.outError = e.message;
+    run.outRunning = false; run.outStage = 0; run.outProgress = null; run.outError = e.message;
   }
   rerender();
 }
@@ -299,7 +317,7 @@ export function importSession(ctx, session) {
   store.markImported(session.id, stream.id);
   const papers = session.papers.map((p) => ({ ...p, source: "import", sources: [session.tool] }));
   toast(`Importing ${papers.length} paper${papers.length === 1 ? "" : "s"} from ${session.tool} — resolving metadata…`);
-  integrateOutside(ctx, papers).then(({ added, merged, overlap }) => {
+  integrateOutside(ctx, papers, `papers from ${session.tool}`).then(({ added, merged, overlap }) => {
     const bits = [`${added} added`];
     if (merged) bits.push(`${merged} merged with existing`);
     if (overlap) bits.push(`${overlap} already in the IS set`);
@@ -314,11 +332,22 @@ export function importSession(ctx, session) {
 // merge into the stream's collection (richest-field merge, sources unioned) →
 // LLM pass for missing summaries/rationales. Rigorous dedupe lives in
 // dedupe.js; identity keys are DOI, OpenAlex id, arXiv id, S2 id, then title.
-async function integrateOutside(ctx, incoming) {
+async function integrateOutside(ctx, incoming, label = "papers") {
   const streamId = ctx.stream.id;
-  const resolved = await resolvePapers(incoming);
+  const { run } = ctx;
+  // Live count so the user can watch the batch move through resolution instead
+  // of waiting on a silent spinner — this is where "many papers" get fetched.
+  const total = incoming.length;
+  run.outProgress = `Reviewing 0/${total} ${label} — resolving metadata & citations…`;
+  ctx.rerender();
+  const resolved = await resolvePapers(incoming, {
+    onProgress: (done) => {
+      run.outProgress = `Reviewing ${done}/${total} ${label} — resolving metadata & citations…`;
+      ctx.rerender();
+    },
+  });
   const cur = store.getStream(streamId);
-  if (!cur) return { added: 0, merged: 0, overlap: 0 };
+  if (!cur) { run.outProgress = null; return { added: 0, merged: 0, overlap: 0 }; }
   const { kept, overlap } = dropWithinOverlap(resolved, cur.within);
   let { list, merged } = dedupeInto(cur.outside || [], kept);
 
@@ -341,6 +370,7 @@ async function integrateOutside(ctx, incoming) {
     outside: list,
     outsideStats: { merged: prev.merged + merged, overlap: prev.overlap + overlap },
   });
+  run.outProgress = null;
   ctx.rerender();
   describeMissing(ctx, streamId);
   return { added: kept.length - merged, merged, overlap };
@@ -381,6 +411,16 @@ async function describeMissing(ctx, streamId) {
 }
 
 // ---- rendering ----
+// A live "how many papers are moving through the pipeline right now" line —
+// shown while a search runs so the user can watch the system actually working
+// (and trust it) instead of staring at a static spinner.
+function progressBanner(text, os = false) {
+  if (!text) return null;
+  return h("div", { class: `progress-banner${os ? " os" : ""}`, role: "status", "aria-live": "polite" },
+    h("div", { class: `progress-spin${os ? " os" : ""}` }),
+    h("div", { class: "progress-text" }, text));
+}
+
 function stageCard(stages, current, { os = false, error = null } = {}) {
   return h("div", { class: `stage-card${os ? " os" : ""}`, role: "status", "aria-live": "polite" },
     stages.map(([lab, det], i) => {
@@ -398,16 +438,20 @@ function stageCard(stages, current, { os = false, error = null } = {}) {
     error && h("div", { class: "stage-err" }, error));
 }
 
-export function paperCard(p, { variant, rank = null, badge = null }) {
+export function paperCard(p, { variant, rank = null, badge = null, cross = null }) {
   const authors = typeof p.authors === "string" ? p.authors : (p.authors || []).join(", ");
   const cites = fmtCites(p.cited);
   const pub = venuePub(p.venue);
   // a record that resisted resolution may have no title — show its identifier
   const title = p.title || (p.doi ? "doi:" + p.doi : p.url) || "(unresolved paper)";
-  return h("div", { class: `paper-card ${variant}` },
+  return h("div", { class: `paper-card ${variant}${cross ? " cross" : ""}` },
     h("div", { class: "top" },
       rank != null && h("div", { class: "rank" }, "#" + rank),
       h("div", { class: "body" },
+        cross && h("div", { class: "cross-ribbon", title: "Found through more than one channel — the strongest corroboration signal" },
+          h("span", { class: "cx-dot" }, "◆"),
+          h("span", {}, `Found across ${cross.length} channels — `, h("strong", {}, cross.join(" · "))))
+        ,
         h("div", { class: "p-title" },
           p.url || p.doi
             ? h("a", { href: p.url || "https://doi.org/" + p.doi, target: "_blank", rel: "noopener" }, title)
@@ -432,7 +476,7 @@ function withinZone(ctx) {
 
   let bodyEl;
   if (run.isRunning) {
-    bodyEl = stageCard(IS_STAGES, run.isStage);
+    bodyEl = [stageCard(IS_STAGES, run.isStage), progressBanner(run.isProgress)];
   } else if (run.isError && !stream.within) {
     bodyEl = stageCard(IS_STAGES, 0, { error: "Review failed — " + run.isError });
   } else if (done || (run.isError && stream.within)) {
@@ -484,6 +528,8 @@ function withinZone(ctx) {
           onclick: () => { store.updateStream(stream.id, { prestige: !prestige }); ctx.rerender(); },
         }, prestige ? "Prestige ranking: on" : "Prestige ranking: off")),
       !run.isRunning && pickerRow(ctx, "wi"),
+      !run.isRunning && !keyedProviders(prefs).length && h("div", { class: "wi-nokey-note" },
+        "The reviewer models are disabled until you add an API key in Preferences."),
       bodyEl));
 }
 
@@ -512,7 +558,7 @@ function queryDock(ctx) {
       !run.isRunning && h("div", { class: "hint run-summary" },
         `Review makes 2 AI calls on your ${PROVIDERS[wiProv].label} key (${modelLabel(wiProv, zoneModel(prefs, "wi"))})` +
         (outsideRuns
-          ? ` and auto-runs the Outside-IS web search on ${osProviders.map((p) => PROVIDERS[p].label).join(" + ")} — toggle that off in the Outside IS zone.`
+          ? ` and auto-runs the Outside-IS web search on ${osProviders.map((p) => modelChannel(prefs, p)).join(" + ")} — toggle that off in the Outside IS zone.`
           : ".")),
       done && h("div", { class: "hint" },
         "Use the ", h("strong", {}, "◀ backward"), " / ", h("strong", {}, "forward ▶"),
@@ -557,13 +603,22 @@ function outsideZone(ctx) {
   const selected = selectedOutsideProviders(prefs);
   const anyKey = keyedProviders(prefs).length > 0;
   const stageLabel = (selected.length ? selected : keyedProviders(prefs))
-    .map((p) => PROVIDERS[p].label).join(", ") || "your models";
+    .map((p) => modelChannel(prefs, p)).join(", ") || "your models";
 
   const outsideGrid = (list) => {
     const st = stream.outsideStats || {};
     const imp = list.filter((p) => sourcesOf(p).some((x) => x !== "Web search")).length;
     const web = list.filter((p) => sourcesOf(p).includes("Web search")).length;
+    // Papers corroborated across several channels (2+ models, or a model AND an
+    // import tool) rise to the top and are highlighted — independent sources
+    // agreeing is the strongest signal in the collection.
+    const cross = list.filter((p) => channelsOf(p).length > 1).length;
+    const ranked = list
+      .map((p, i) => ({ p, i, c: channelsOf(p).length }))
+      .sort((a, b) => b.c - a.c || a.i - b.i)
+      .map((x) => x.p);
     const bits = [`${list.length} paper${list.length === 1 ? "" : "s"}`];
+    if (cross) bits.push(`${cross} across multiple channels`);
     if (web) bits.push(`${web} from web search`);
     if (imp) bits.push(`${imp} imported`);
     if (st.merged) bits.push(`${st.merged} duplicate${st.merged === 1 ? "" : "s"} merged`);
@@ -571,7 +626,10 @@ function outsideZone(ctx) {
     return [
       h("div", { class: "outside-line" }, bits.join(" · "), exportRow(list, "outside-is-collection")),
       h("div", { class: "results-grid" },
-        list.map((p) => paperCard(p, { variant: "os", badge: badgeFor(p) }))),
+        ranked.map((p) => {
+          const chs = channelsOf(p);
+          return paperCard(p, { variant: "os", badge: badgeFor(p), cross: chs.length > 1 ? chs : null });
+        })),
     ];
   };
 
@@ -608,6 +666,7 @@ function outsideZone(ctx) {
             h("div", { class: "s" }, "Every AI you've connected searches the web in parallel; results are merged and de-duplicated")),
           llmBody),
         extPanel(ctx)),
+      progressBanner(run.outProgress, true),
       stream.outside?.length
         ? outsideGrid(stream.outside)
         : h("div", { class: "outside-line empty" },

@@ -133,10 +133,14 @@ export function prestigeSort(results, prefs) {
 // The system prompt is user-visible and user-adjustable (Outside IS →
 // "Search prompt"). {n} is substituted with the requested paper count; the
 // researcher profile + research question are always appended as the user turn.
+// The search is deliberately NOT restricted to work "outside" the IS field —
+// it draws on the whole scholarly web; anything already in the within-IS main
+// set is dropped afterwards (dropWithinOverlap), so the wider net never
+// double-counts the corpus results.
 export const OUTSIDE_PROMPT_DEFAULT =
   "Use your web search tool to find real, verifiable academic papers relevant to the research question, " +
-  "from outside the core Information Systems (IS) journals and conferences. Never invent a paper — every entry " +
-  "must come from something you actually found. Reply with JSON only:\n" +
+  "drawing on the full breadth of the scholarly literature across every relevant discipline. Never invent a paper — " +
+  "every entry must come from something you actually found. Reply with JSON only:\n" +
   "{\"papers\": [{\"title\": str, \"authors\": str, \"venue\": str, \"year\": int, \"discipline\": str, " +
   "\"url\": str, \"doi\": str|null, \"summary\": <one-line summary>, \"rationale\": <why it matters for this question>}]}\n" +
   "— up to {n} papers, most relevant first.";
@@ -208,7 +212,7 @@ async function s2Lookup(s2id, timeoutMs) {
   return res.json();
 }
 
-export async function resolvePapers(papers, { concurrency = 4, timeoutMs = 9000 } = {}) {
+export async function resolvePapers(papers, { concurrency = 4, timeoutMs = 9000, onProgress = null } = {}) {
   const resolveOne = async (raw) => {
     const p = { ...raw };
     try {
@@ -262,9 +266,13 @@ export async function resolvePapers(papers, { concurrency = 4, timeoutMs = 9000 
     } catch { return p; }
   };
   const out = new Array(papers.length);
-  let idx = 0;
+  let idx = 0, done = 0;
   await Promise.all(Array.from({ length: Math.min(concurrency, papers.length) }, async () => {
-    while (idx < papers.length) { const i = idx++; out[i] = await resolveOne(papers[i]); }
+    while (idx < papers.length) {
+      const i = idx++;
+      out[i] = await resolveOne(papers[i]);
+      onProgress?.(++done, papers.length);
+    }
   }));
   return out;
 }
