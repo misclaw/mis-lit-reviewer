@@ -11,6 +11,8 @@ import { renderReview } from "./review.js";
 import { renderGraph, ensureGraph } from "./graph.js";
 import { parseInbound } from "./handoff.js";
 import { startTour } from "./tour.js";
+import * as sync from "./sync.js";
+import { syncNavButton, accountModal, storageNoticeModal } from "./account.js";
 
 const root = document.getElementById("app");
 
@@ -20,6 +22,9 @@ const app = {
   mode: "main", // main | back | fwd
   streamOpen: false,
   prefsOpen: false,
+  accountOpen: false,
+  noticeOpen: false,          // one-time local-storage caution
+  tourAfterAccount: false,    // first-run: notice → account modal → tour
   status: null, // public/data/status.json — corpus stats for the idle card
   runs: new Map(), // streamId → runtime (non-persisted) pipeline state
 };
@@ -195,11 +200,18 @@ function nav(stream) {
             disabled: m !== "main" && !ready,
             onclick: () => actions.goMode(m) }, label))),
       h("div", { class: "nav-spacer" }),
-      h("div", { class: "privacy",
-        title: "Your research activity — questions, streams, results — is stored only in this browser. " +
-          "AI requests (your question + researcher profile) go directly to the provider you chose, with your key. " +
-          "Production pages load Google Analytics for anonymous page-view stats." },
-        h("span", { class: "dot" }), "Research data stays in this browser"),
+      sync.getState().user
+        ? h("div", { class: "privacy",
+            title: "Your research activity syncs to a private row only your account can read. " +
+              "LLM API keys never sync — they stay in this browser. " +
+              "AI requests go directly to the provider you chose, with your key." },
+            h("span", { class: "dot" }), "Synced · private to your account")
+        : h("div", { class: "privacy",
+            title: "Your research activity — questions, streams, results — is stored only in this browser. " +
+              "AI requests (your question + researcher profile) go directly to the provider you chose, with your key. " +
+              "Production pages load Google Analytics for anonymous page-view stats." },
+            h("span", { class: "dot" }), "Research data stays in this browser"),
+      syncNavButton(() => { app.accountOpen = true; render(); }),
       h("button", { class: "nav-btn nav-help", title: "How this works — take the quick tour",
         onclick: () => startTour(ctx()) }, "?"),
       h("button", { class: "nav-btn nav-prefs", title: "Preferences",
@@ -257,18 +269,68 @@ function prefsModal() {
 }
 
 // ---- render loop ----
+function accountOverlay() {
+  const done = () => {
+    app.accountOpen = false;
+    // Restoring on a fresh device: the pulled workspace may already be
+    // onboarded — skip the wizard and land in the app.
+    if (app.screen === "onboard" && store.isOnboarded()) app.screen = "app";
+    render();
+    // first-run chain: the storage notice deferred the tour to after this
+    if (app.tourAfterAccount) {
+      app.tourAfterAccount = false;
+      if (app.screen === "app" && !store.isTourSeen()) startTour(ctx());
+    }
+  };
+  return accountModal({ onClose: done, onSignedIn: done });
+}
+
+// The one-time "your work lives in this browser" caution. Either choice
+// acknowledges it; "register" flows into the account modal.
+function noticeOverlay() {
+  const ack = () => { store.markStorageNoticeSeen(); app.noticeOpen = false; };
+  return storageNoticeModal({
+    onRegister: () => {
+      ack();
+      app.tourAfterAccount = !store.isTourSeen();
+      app.accountOpen = true;
+      render();
+    },
+    onContinue: () => {
+      ack();
+      render();
+      if (!store.isTourSeen()) startTour(ctx());
+    },
+  });
+}
+
 function render() {
   if (app.screen === "onboard") {
-    root.replaceChildren();
-    renderOnboard(root, {
+    // renderOnboard re-renders inside its own wrapper, so the sign-in corner
+    // and the account modal live NEXT to it and survive its step changes.
+    const wrap = h("div");
+    renderOnboard(wrap, {
       mode: "onboard",
       onDone: () => {
         app.screen = "app";
         if (!store.listStreams().length) store.createStream("Untitled review stream");
-        render();
-        if (!store.isTourSeen()) startTour(ctx()); // first run → offer the tour
+        // first run: local-storage caution first (unless signed in), then tour
+        if (!sync.getState().user && !store.isStorageNoticeSeen()) {
+          app.noticeOpen = true;
+          render();
+        } else {
+          render();
+          if (!store.isTourSeen()) startTour(ctx());
+        }
       },
     });
+    root.replaceChildren(...[
+      wrap,
+      h("button", { class: "onb-signin",
+        onclick: () => { app.accountOpen = true; render(); } },
+        "Already use Paper Trails? Sign in to restore your workspace"),
+      app.accountOpen ? accountOverlay() : null,
+    ].filter(Boolean));
     return;
   }
   const stream = currentStream();
@@ -279,6 +341,8 @@ function render() {
     ...arrows(stream),
     app.mode === "main" ? renderReview(c) : renderGraph(c, app.mode),
     app.prefsOpen ? prefsModal() : null,
+    app.accountOpen ? accountOverlay() : null,
+    app.noticeOpen ? noticeOverlay() : null,
   ].filter(Boolean));
 }
 
@@ -307,7 +371,20 @@ window.addEventListener("hashchange", () => receiveHandoff({ rerender: true }));
 // modal open so in-progress edits aren't clobbered; the store cache is already
 // invalidated, so the next render picks the changes up regardless.
 store.onExternalChange(() => {
-  if (app.screen === "app" && !app.prefsOpen) render();
+  if (app.screen === "app" && !app.prefsOpen && !app.accountOpen) render();
+});
+
+// Cloud sync (no-op unless the user signs in; restores a saved session on boot)
+sync.start();
+
+// Existing local-only users get the storage caution once too — but only after
+// the session restore settles, so signed-in users never see a false alarm.
+sync.ready.then(() => {
+  if (app.screen === "app" && !sync.getState().user && !store.isStorageNoticeSeen()
+      && !app.noticeOpen && !app.accountOpen) {
+    app.noticeOpen = true;
+    render();
+  }
 });
 
 fetch((import.meta.env.BASE_URL || "./") + "data/status.json")

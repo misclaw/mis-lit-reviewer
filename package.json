@@ -10,7 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.3.0"
+    "@huggingface/transformers": "^3.3.0",
+    "@supabase/supabase-js": "^2.110.7"
   },
   "devDependencies": {
     "vite": "^6.0.0"

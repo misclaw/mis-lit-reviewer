@@ -1,7 +1,7 @@
 // Onboarding wizard (first run) and Preferences editor (same component in a
 // modal). Five steps: workspace profile → interests → philosophy & methods →
-// target journals → LLM API keys. No password and no backend — the "account"
-// is a local profile; keys and preferences live in this browser only.
+// target journals → LLM API keys. The profile here is local; the optional
+// sync account (account.js) is separate, and keys never leave this browser.
 import { h } from "./ui.js";
 import { getProfile, getPrefs, saveOnboarding } from "./store.js";
 import { PROVIDERS, verifyKey } from "./llm.js";
@@ -57,7 +57,8 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
     if (draft.step === 0) return [
       h("div", { class: "onb-h" }, mode === "edit" ? "Your workspace" : "Set up your workspace"),
       h("div", { class: "onb-sub" },
-        "This demo runs entirely in your browser — no account, no server. Open-source: audit the code and run it locally if you prefer."),
+        "Runs in your browser — no account required. An optional free account (⇅ in the top bar later) " +
+        "syncs your workspace across devices. Open-source: audit the code and run it locally if you prefer."),
       h("label", { class: "field" }, "Name",
         h("input", { value: draft.profile.name, placeholder: "Ada Scholar",
           oninput: (e) => { draft.profile.name = e.target.value; } })),

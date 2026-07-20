@@ -28,6 +28,7 @@ const EMPTY = () => ({
   prefs: DEFAULT_PREFS(),
   onboarded: false,
   tourSeen: false,
+  storageNoticeSeen: false, // one-time local-only-storage caution acknowledged
   streams: [],
   lastStreamId: null, // the stream the user last worked in — restored on boot
   sessions: [], // captured by the extension / handed off from other apps
@@ -75,6 +76,55 @@ function load() {
 }
 function save() {
   localStorage.setItem(KEY, JSON.stringify(cache));
+  notifyLocal();
+}
+
+// ---- cloud sync hooks ----
+// Local writes notify the sync engine (in-tab; cross-tab writes arrive via the
+// storage event above). The engine decides whether anything actually changed.
+const localListeners = new Set();
+export function onLocalChange(fn) { localListeners.add(fn); }
+function notifyLocal() {
+  for (const fn of localListeners) { try { fn(); } catch { /* listener error */ } }
+}
+
+// The document that syncs: everything except LLM API keys and their verified
+// flags — keys are paid, device-local credentials and never leave this browser.
+export function syncSnapshot() {
+  const d = load();
+  return JSON.stringify({
+    ...d,
+    prefs: { ...d.prefs, keys: { anthropic: "", openai: "", gemini: "" }, verified: {} },
+  });
+}
+
+// True when this device has nothing worth keeping — lets a sign-in adopt the
+// account's workspace wholesale instead of merging into it.
+export function isPristine() {
+  const d = load();
+  const touched = d.streams.some((s) => s.query || s.within || s.outside || s.backward || s.forward);
+  return !d.onboarded && !touched && !d.sessions.length;
+}
+
+// Quiet replacement from cloud sync: swap in the account's document, keep this
+// browser's keys/verified flags, skip the import-backup ceremony (sync flows
+// continuously in both directions). Notifies UI listeners but NOT the local-
+// change hook — the sync engine orchestrates its own pushes around this.
+export function applyRemote(json) {
+  const d = JSON.parse(json);
+  const cur = load();
+  cache = {
+    ...EMPTY(),
+    ...d,
+    prefs: {
+      ...DEFAULT_PREFS(), ...(d.prefs || {}),
+      keys: { ...cur.prefs.keys }, verified: { ...cur.prefs.verified },
+    },
+    streams: Array.isArray(d.streams) ? d.streams : [],
+    sessions: Array.isArray(d.sessions) ? d.sessions : [],
+  };
+  localStorage.setItem(KEY, JSON.stringify(cache));
+  for (const fn of externalListeners) { try { fn(); } catch { /* listener error */ } }
 }
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
@@ -103,6 +153,11 @@ export function isTourSeen() { return !!load().tourSeen; }
 export function markTourSeen() {
   const d = load();
   if (!d.tourSeen) { d.tourSeen = true; save(); }
+}
+export function isStorageNoticeSeen() { return !!load().storageNoticeSeen; }
+export function markStorageNoticeSeen() {
+  const d = load();
+  if (!d.storageNoticeSeen) { d.storageNoticeSeen = true; save(); }
 }
 
 // ---- review streams ----
@@ -234,6 +289,7 @@ export function importStore(json) {
     },
     onboarded: !!d.onboarded,
     tourSeen: !!d.tourSeen,
+    storageNoticeSeen: !!d.storageNoticeSeen,
     streams: Array.isArray(d.streams) ? d.streams : [],
     lastStreamId: d.lastStreamId || null,
     sessions: Array.isArray(d.sessions) ? d.sessions : [],

@@ -503,6 +503,28 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 }
 .modal-overlay .onb-wrap { padding: 0; max-width: 720px; }
 
+/* ---------- account & sync ---------- */
+.nav-sync.on { color: var(--green-text); border-color: var(--green-soft); }
+.nav-sync.err { color: #b3402e; }
+.acct-card {
+  max-width: 480px; margin: 0 auto; background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 26px 28px; box-shadow: 0 12px 40px rgba(0, 0, 0, .18);
+}
+.acct-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+.acct-err { color: #b3402e; font-size: 13px; margin-top: 4px; min-height: 1em; }
+.acct-status { font-size: 13.5px; font-weight: 600; color: var(--green-text); margin: 6px 0 2px; }
+.acct-status.err { color: #b3402e; }
+.acct-note { font-size: 12.5px; color: var(--muted); margin-top: 16px; line-height: 1.5; }
+.notice-list { margin: 0 0 14px; padding-left: 20px; font-size: 13.5px; line-height: 1.55; color: var(--muted); }
+.notice-list li { margin: 6px 0; }
+.notice-list strong { color: inherit; }
+.onb-signin {
+  position: fixed; top: 14px; right: 16px; z-index: 30; cursor: pointer;
+  font-size: 12.5px; color: var(--muted); background: var(--card);
+  border: 1px solid var(--input-border); border-radius: 999px; padding: 7px 14px;
+}
+.onb-signin:hover { border-color: var(--hover-border); color: var(--ink); }
+
 /* ---------- citation graph ---------- */
 .graph-zone { min-height: calc(100vh - 56px); }
 .graph-zone.back { background: var(--wi-bg); border-bottom: 1px solid var(--wi-border); }

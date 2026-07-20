@@ -8,3 +8,7 @@ dist/
 # raw uncompressed dataset staging (>100MB; we ship public/data/*.gz instead)
 data-gen/papers.slim.jsonl
 .wrangler/
+
+# Mac app build artifacts (macos/build.sh output)
+macos/build/
+macos/icon.svg.png
