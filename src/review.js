@@ -898,7 +898,9 @@ function extPanel(ctx) {
 }
 
 export function renderReview(ctx) {
-  return h("div", { class: "main-mode" },
+  // In one-column mode the whole category (header, refined line, method panels,
+  // results) is capped to the common paper-column width; two-column fills.
+  return h("div", { class: "main-mode " + (isOneCol() ? "onecol" : "twocol") },
     withinZone(ctx),
     queryDock(ctx),
     outsideZone(ctx));

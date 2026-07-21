@@ -256,6 +256,11 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 .zone-is .zone-inner { padding-bottom: 96px; }
 .zone-os .zone-inner { padding-top: 96px; padding-bottom: 60px; }
 @media (max-width: 900px) { .zone-inner { padding-left: 20px; padding-right: 20px; } }
+/* one-column mode: cap the whole category (header + body) to the common paper
+   width (820px content) so nothing — not even the category header — sprawls
+   wider than the result column. Two-column mode keeps the full 1240px. */
+.main-mode.onecol .zone-inner { max-width: calc(820px + 144px); }
+@media (max-width: 900px) { .main-mode.onecol .zone-inner { max-width: 100%; } }
 
 .zone-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; flex-wrap: wrap; }
 .zone-title { font-family: var(--serif); font-size: 22px; font-weight: 700; }
