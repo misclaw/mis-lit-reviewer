@@ -364,14 +364,14 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 .paper-card .top { display: flex; gap: 10px; align-items: baseline; }
 .paper-card .rank { font-size: 12px; font-weight: 700; color: var(--wi-faint); min-width: 22px; }
 .paper-card .body { flex: 1; min-width: 0; }
-.p-title { font-family: var(--serif); font-size: 16px; font-weight: 600; line-height: 1.3; }
+.p-title { font-family: var(--serif); font-size: 17px; font-weight: 600; line-height: 1.3; }
 .paper-card.wi .p-title, .paper-card.wi .p-title a { color: var(--wi-head); }
 .paper-card.os .p-title, .paper-card.os .p-title a { color: var(--os-head); }
 /* author · venue · year — one consistent colour (Google-Scholar-style green),
    distinct from the zone-accent title and the black body text */
-.p-meta { font-size: 12.5px; color: var(--meta); margin-top: 4px; }
+.p-meta { font-size: 13px; color: var(--meta); margin-top: 4px; }
 .p-meta strong { color: inherit; font-weight: 600; }
-.p-summary { font-size: 13.5px; font-style: italic; color: var(--text); opacity: 0.85; margin-top: 7px; }
+.p-summary { font-size: 13px; font-style: italic; color: var(--text); opacity: 0.85; margin-top: 7px; }
 .p-rationale { font-size: 13px; margin-top: 7px; border-radius: 6px; padding: 8px 10px; }
 .paper-card.wi .p-rationale { color: var(--wi-sub); background: var(--wi-soft); }
 .paper-card.os .p-rationale { color: var(--os-sub); background: var(--os-soft); }
@@ -383,7 +383,7 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 .paper-card.os .p-points { background: var(--os-soft); }
 .paper-card.wi .p-points strong, .paper-card.wi .p-points li::marker { color: var(--wi-accent); }
 .paper-card.os .p-points strong, .paper-card.os .p-points li::marker { color: var(--os-accent); }
-.p-foot { font-size: 12px; margin-top: 8px; display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; }
+.p-foot { font-size: 13px; margin-top: 8px; display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; }
 .paper-card.wi .p-foot { color: var(--wi-faint); }
 .paper-card.os .p-foot { color: var(--os-faint); }
 

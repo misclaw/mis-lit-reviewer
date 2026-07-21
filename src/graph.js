@@ -6,7 +6,7 @@
 import { h, fmtCites } from "./ui.js";
 import * as store from "./store.js";
 import { collectBackward, collectForward, screenCandidates } from "./citegraph.js";
-import { venueAbbr } from "./pipeline.js";
+import { venueShort } from "./pipeline.js";
 import { resolveModel } from "./llm.js";
 import { paperCard, gridLayoutClass, normPoints, pointText, fmtAuthors } from "./review.js";
 import { openPaperModal } from "./paper-modal.js";
@@ -100,8 +100,9 @@ function gCard(p, { main = false, x, y, hClamp, sel = false, linkNote, onClick, 
             onclick: (e) => e.stopPropagation() }, p.title)
         : h("a", {}, p.title)),
     h("div", { class: "gm" },
-      fmtAuthors(p.authors, 60),
-      " · ", h("strong", {}, venueAbbr(p.venue)), p.year ? ` · ${p.year}` : ""),
+      fmtAuthors(p.authors, 3),
+      " · ", (() => { const vd = venueShort(p.venue); return h("strong", { title: vd.title || null }, vd.text); })(),
+      p.year ? ` · ${p.year}` : ""),
     h("div", { class: "gr" }, pointText(normPoints(p)[0]) || p.rationale || p.summary || ""),
     h("div", { class: "gf" },
       h("span", {}, linkNote),

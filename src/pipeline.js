@@ -43,6 +43,20 @@ export const CONFERENCES = ["ICIS", "ECIS", "PACIS", "AMCIS"];
 export function venueAbbr(v) { return VENUES[v]?.abbr || v || "—"; }
 export function venuePub(v) { return VENUES[v]?.pub || ""; }
 
+// Card-friendly venue: a known IS venue collapses to its abbreviation (MISQ,
+// JAIS, …); a long outside venue is truncated Google-Scholar-style. Either way
+// `title` carries the full name for the hover tooltip ("" when nothing hidden).
+export function venueShort(v) {
+  if (!v) return { text: "—", title: "" };
+  const known = VENUES[v];
+  if (known) return { text: known.abbr, title: known.abbr === v ? "" : v };
+  if (v.length > 30) {
+    const t = v.slice(0, 28).replace(/\s+\S*$/, "").replace(/[,;:]+$/, "");
+    return { text: t + "…", title: v };
+  }
+  return { text: v, title: "" };
+}
+
 function profileBlurb(profile, prefs) {
   const bits = [];
   if (prefs.topics.length) bits.push(`research interests: ${prefs.topics.join(", ")}`);

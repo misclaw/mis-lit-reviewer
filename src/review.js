@@ -8,7 +8,7 @@ import { PROVIDERS, resolveModel, modelLabel, isAuthError } from "./llm.js";
 import { exportRow } from "./export.js";
 import {
   refineQuery, similarityFilter, rerank, prestigeSort, searchOutside, resolvePapers,
-  describeImports, venuePub, VENUES, OUTSIDE_PROMPT_DEFAULT, cleanPoints,
+  describeImports, venueShort, VENUES, OUTSIDE_PROMPT_DEFAULT, cleanPoints,
 } from "./pipeline.js";
 import { dedupeInto, dropWithinOverlap, sourcesOf, recommendersOf, channelsOf } from "./dedupe.js";
 import { openPaperModal } from "./paper-modal.js";
@@ -453,19 +453,30 @@ function pointsBlock(p) {
   return null;
 }
 
-// Trim a long author list by total length, cutting at an author boundary and
-// appending "et al." — keeps the meta line from dominating a card.
-export function fmtAuthors(authors, max = 100) {
-  const s = typeof authors === "string" ? authors : (authors || []).join(", ");
-  if (s.length <= max) return s;
-  const names = s.split(/,\s*/);
-  let out = "";
-  for (const n of names) {
-    const next = out ? out + ", " + n : n;
-    if (next.length > max && out) break;
-    out = next;
+// Google-Scholar-style author: given names collapse to concatenated initials
+// before the surname — "Marshall Scott Poole" → "MS Poole", "Yang Zhao" → "Y Zhao".
+function abbreviateAuthor(name) {
+  const n = (name || "").trim();
+  if (!n) return "";
+  if (n.includes(",")) { // "Last, First M" → "FM Last"
+    const [last, rest = ""] = n.split(",");
+    const initials = rest.trim().split(/\s+/).filter(Boolean).map((w) => w[0].toUpperCase()).join("");
+    return (initials ? initials + " " : "") + last.trim();
   }
-  return (out || names[0]) + " et al.";
+  const parts = n.split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return n;
+  const last = parts[parts.length - 1];
+  const initials = parts.slice(0, -1).map((w) => w[0].toUpperCase()).join("");
+  return initials + " " + last;
+}
+// Shorten an author list the way Scholar does: abbreviate each name, show the
+// first few, and trail a "…" (no "et al.") when there are more.
+export function fmtAuthors(authors, maxAuthors = 4) {
+  const list = Array.isArray(authors) ? authors : String(authors || "").split(/,\s*/);
+  const names = list.map(abbreviateAuthor).filter(Boolean);
+  if (!names.length) return "";
+  if (names.length <= maxAuthors) return names.join(", ");
+  return names.slice(0, maxAuthors).join(", ") + "…";
 }
 
 // Result columns: default one column (Google-Scholar-style), opt-in two.
@@ -503,7 +514,7 @@ export function layoutToggle(ctx) {
 export function paperCard(p, { variant, rank = null, badge = null, cross = null, ctx = null }) {
   const authors = fmtAuthors(p.authors);
   const cites = fmtCites(p.cited);
-  const pub = venuePub(p.venue);
+  const vd = venueShort(p.venue); // abbreviation (known) / truncation (outside) + full-name hover
   // a record that resisted resolution may have no title — show its identifier
   const title = p.title || (p.doi ? "doi:" + p.doi : p.url) || "(unresolved paper)";
   // Clicking the card body opens the detail + abstract modal; the title link
@@ -536,9 +547,8 @@ export function paperCard(p, { variant, rank = null, badge = null, cross = null,
             : title),
         h("div", { class: "p-meta" },
           authors, authors ? " · " : "",
-          h("strong", {}, p.venue || "—"),
-          p.year ? ` · ${p.year}` : "",
-          pub ? ` · ${pub}` : ""),
+          h("strong", { title: vd.title || null }, vd.text),
+          p.year ? ` · ${p.year}` : ""),
         p.summary && h("div", { class: "p-summary" }, p.summary),
         pointsBlock(p),
         h("div", { class: "p-foot" },
