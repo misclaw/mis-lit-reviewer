@@ -45,7 +45,7 @@ export function storageNoticeModal({ onRegister, onContinue } = {}) {
     h("div", { class: "acct-card", role: "dialog", "aria-modal": "true", "aria-label": "Where your work is saved" },
       h("div", { class: "onb-h" }, "A quick word about where your work is saved"),
       h("div", { class: "onb-sub" },
-        "Right now everything you build here — review streams, imported sessions, preferences — lives ",
+        "Right now everything you build here — review streams, imported sessions, settings — lives ",
         h("strong", {}, "only in this browser, on this device"), ". That works, with two honest caveats:"),
       h("ul", { class: "notice-list" },
         h("li", {},
@@ -132,7 +132,7 @@ export function accountModal({ onClose, onSignedIn } = {}) {
           ]
         : [
             h("div", { class: "onb-sub" },
-              "Optional. One free account keeps your review streams, imported sessions, and preferences in sync on every device — browser or Mac app. ",
+              "Optional. One free account keeps your review streams, imported sessions, and settings in sync on every device — browser or Mac app. ",
               h("strong", {}, "API keys never sync"), " — they stay in each browser you enter them in."),
             h("label", { class: "field" }, "Email", email),
             h("label", { class: "field" }, "Password", pass),

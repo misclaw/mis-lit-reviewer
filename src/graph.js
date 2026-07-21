@@ -42,7 +42,7 @@ export async function ensureGraph(ctx, dir) {
   const provider = prefs.provider;
   const key = prefs.keys[provider];
   const model = resolveModel(provider, prefs.models.wi?.[provider]);
-  if (!key?.trim()) { g.error = "no API key configured — add one in Preferences"; rerender(); return; }
+  if (!key?.trim()) { g.error = "no API key configured — add one in Settings"; rerender(); return; }
 
   g.running = true; g.stage = 1; g.error = null;
   rerender();

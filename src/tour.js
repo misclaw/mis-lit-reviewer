@@ -18,7 +18,7 @@ const STEPS = [
     body: "After a review, trace citations: Backward shows what your main papers cite, Forward shows what cites them — ~20 LLM-screened papers each way." },
   { sel: ".stream-btn", title: "Review streams",
     body: "Each stream is one question with its own results. Switch, add, or export streams here — everything is stored in this browser only." },
-  { sel: ".nav-prefs", title: "Preferences",
+  { sel: ".nav-prefs", title: "Settings",
     body: "Your profile, target venues, API keys, and per-zone provider + model. Rerun this tour any time from the ? button." },
 ];
 

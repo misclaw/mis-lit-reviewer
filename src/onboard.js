@@ -1,4 +1,4 @@
-// Onboarding wizard (first run) and Preferences editor (same component in a
+// Onboarding wizard (first run) and Settings editor (same component in a
 // modal). Five steps: workspace profile → interests → philosophy & methods →
 // target journals → LLM API keys. The profile here is local; the optional
 // sync account (account.js) is separate, and keys never leave this browser.
@@ -18,13 +18,16 @@ const METHODS = [
   "Qualitative / case study", "Mixed methods", "Design science / DSR", "Meta-analysis / review",
 ];
 const STEPS = ["Workspace", "Interests", "Philosophy", "Journals", "API keys"];
+// The API-keys step is the last one; callers deep-link here when a key is missing.
+export const KEYS_STEP = STEPS.length - 1;
 
-// mode: "onboard" (first run, full page) | "edit" (preferences modal)
-export function renderOnboard(container, { mode = "onboard", onDone, onCancel } = {}) {
+// mode: "onboard" (first run, full page) | "edit" (settings modal)
+// initialStep: which step to open on (edit mode deep-links here, e.g. API keys)
+export function renderOnboard(container, { mode = "onboard", onDone, onCancel, initialStep = 0 } = {}) {
   const draft = {
     profile: getProfile(),
     prefs: getPrefs(),
-    step: 0,
+    step: Math.min(Math.max(0, initialStep | 0), STEPS.length - 1),
     verifying: {},  // provider → "busy" | "ok" | "err"
     verifyErr: {},  // provider → last verification error message
     keyWarn: null,  // footer warning after a failed finish-time verification
@@ -67,7 +70,7 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
           oninput: (e) => { draft.profile.email = e.target.value; } })),
       h("div", { class: "privacy-note" },
         h("strong", {}, "Privacy — "),
-        "we keep your ", h("strong", {}, "preferences only"), ", in this browser. Your research activity — queries, papers viewed, review streams — is never collected or sent anywhere except the APIs you call with your own keys."),
+        "we keep your ", h("strong", {}, "settings only"), ", in this browser. Your research activity — queries, papers viewed, review streams — is never collected or sent anywhere except the APIs you call with your own keys."),
     ];
     if (draft.step === 1) return [
       h("div", { class: "onb-h" }, "Your research interests"),
@@ -103,7 +106,7 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
       h("div", { class: "onb-sub" },
         "The AI features (query refinement, reranking, rationales, web search) need one key, verified before you start. " +
         "No key? You can still start and import papers from external tools via the browser extension — " +
-        "add a key any time in Preferences. Keys are stored in this browser and sent only to their provider."),
+        "add a key any time in Settings. Keys are stored in this browser and sent only to their provider."),
       Object.keys(PROVIDERS).map((prov) => keyRow(prov)),
       h("button", { class: `outside-toggle${p.outsideEnabled ? " on" : ""}`,
         "aria-pressed": String(!!p.outsideEnabled),
@@ -115,7 +118,7 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
             "Either way you can run it manually on the main page — or import results from Google Scholar Labs, Asta, Paper Digest, or SciSpace via the browser extension."))),
       h("div", { class: "privacy-note" },
         h("strong", {}, "Worried about pasting a key into a website? "),
-        "Fair. This project is open-source — review the code and run it locally instead. We collect preferences only, never your search activity."),
+        "Fair. This project is open-source — review the code and run it locally instead. We collect settings only, never your search activity."),
     ];
   }
 
@@ -179,7 +182,7 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
   }
 
   function finishLabel() {
-    if (mode === "edit") return draft.allowUnverified ? "Save anyway" : "Save preferences";
+    if (mode === "edit") return draft.allowUnverified ? "Save anyway" : "Save settings";
     if (draft.allowUnverified) return "Start anyway →";
     if (!anyKey()) return "Start without a key →";
     return "Start reviewing →";
@@ -214,6 +217,11 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
     render();
   }
 
+  // Step navigation, shared by the Back/Continue buttons and the arrow keys.
+  // Arrow keys only move between steps — they never finish/submit.
+  function goPrev() { if (draft.step > 0) { draft.step--; render(); } }
+  function goNext() { if (draft.step < STEPS.length - 1) { draft.step++; render(); } }
+
   function render() {
     const isLast = draft.step === STEPS.length - 1;
     const busy = Object.values(draft.verifying).includes("busy");
@@ -235,12 +243,13 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
                 onclick: i < draft.step ? () => { draft.step = i; render(); } : undefined,
               })))),
         h("div", { class: "onb-card" },
-          stepBody(),
-          isLast && draft.keyWarn && h("div", { class: "key-warn", role: "alert" }, draft.keyWarn),
+          h("div", { class: "onb-body" },
+            stepBody(),
+            isLast && draft.keyWarn && h("div", { class: "key-warn", role: "alert" }, draft.keyWarn)),
           h("div", { class: "onb-foot" },
             mode === "edit" && h("button", { class: "btn", onclick: () => onCancel?.() }, "Cancel"),
             h("button", { class: "btn", disabled: draft.step === 0,
-              onclick: () => { if (draft.step > 0) { draft.step--; render(); } } }, "Back"),
+              onclick: goPrev }, "Back"),
             h("button", { class: "btn-ink", disabled: busy,
               onclick: () => {
                 if (!isLast) { draft.step++; render(); }
@@ -250,5 +259,9 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel } 
   }
 
   render();
-  return { isDirty: () => JSON.stringify({ profile: draft.profile, prefs: draft.prefs }) !== baseline };
+  return {
+    isDirty: () => JSON.stringify({ profile: draft.profile, prefs: draft.prefs }) !== baseline,
+    prev: goPrev,
+    next: goNext,
+  };
 }

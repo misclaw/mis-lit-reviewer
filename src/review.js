@@ -12,6 +12,15 @@ import {
 } from "./pipeline.js";
 import { dedupeInto, dropWithinOverlap, sourcesOf, recommendersOf, channelsOf } from "./dedupe.js";
 import { openPaperModal } from "./paper-modal.js";
+import { KEYS_STEP } from "./onboard.js";
+
+// Deep-link into the Settings modal's API-keys step (e.g. from a keyless
+// provider chip, or when a run is attempted with no key configured).
+function openKeySettings(ctx) {
+  ctx.app.prefsOpen = true;
+  ctx.app.prefsStep = KEYS_STEP;
+  ctx.rerender();
+}
 
 function savePrefs(patch) {
   store.saveOnboarding(store.getProfile(), { ...store.getPrefs(), ...patch });
@@ -49,19 +58,20 @@ function pickerRow(ctx, zone) {
   const model = zoneModel(prefs, zone);
   return h("div", { class: `provider-row ${zone}` },
     h("div", { class: "lab" }, zone === "wi" ? "Reviewer:" : "Provider:"),
-    // Single-select, but — like the Outside-IS picker — a provider with no key
-    // is disabled (non-clickable). If NONE are keyed, every chip is disabled.
+    // Single-select. A provider with no key shows dashed/dimmed and, when
+    // clicked, jumps to Settings → API keys instead of selecting itself.
     Object.keys(PROVIDERS).map((p) => {
       const has = !!prefs.keys[p]?.trim();
+      // A keyless provider isn't disabled — clicking it takes you straight to
+      // the Settings API-keys step to add one, rather than being a dead end.
       return h("button", {
         class: `chip${p === prov ? " on " + zone : ""}${has ? "" : " nokey"}`,
         "aria-pressed": String(p === prov),
-        disabled: !has,
-        title: has ? "" : `Add a ${PROVIDERS[p].label} key in Preferences to use it`,
+        title: has ? "" : `No ${PROVIDERS[p].label} key yet — click to add one in Settings`,
         onclick: has ? () => {
           savePrefs(zone === "wi" ? { provider: p } : { outsideProvider: p });
           ctx.rerender();
-        } : null,
+        } : () => openKeySettings(ctx),
       }, PROVIDERS[p].label, has ? null : h("span", { class: "nokey-tag" }, "no key"));
     }),
     h("select", { class: "model-select",
@@ -76,9 +86,9 @@ function pickerRow(ctx, zone) {
 }
 
 // Outside-IS model picker: a MULTI-select. Every provider shows as a toggle
-// chip; providers without a key are disabled (non-clickable). The search fans
-// out to all selected+keyed models. A per-model dropdown appears for each
-// selected model so you can still choose the tier.
+// chip; a provider without a key shows dashed/dimmed and, when clicked, jumps
+// to Settings → API keys. The search fans out to all selected+keyed models.
+// A per-model dropdown appears for each selected model so you can pick the tier.
 function outsidePicker(ctx) {
   const prefs = store.getPrefs();
   const selected = new Set(selectedOutsideProviders(prefs));
@@ -94,15 +104,14 @@ function outsidePicker(ctx) {
       return h("button", {
         class: `chip multi${on ? " on os" : ""}${has ? "" : " nokey"}`,
         "aria-pressed": String(on),
-        disabled: !has,
         title: has
           ? (on ? `Searching with ${PROVIDERS[p].label} — click to exclude` : `Click to include ${PROVIDERS[p].label}`)
-          : `Add a ${PROVIDERS[p].label} key in Preferences to search with it`,
+          : `No ${PROVIDERS[p].label} key yet — click to add one in Settings`,
         onclick: has ? () => {
           const next = new Set(selectedOutsideProviders(prefs));
           next.has(p) ? next.delete(p) : next.add(p);
           setSelection(next);
-        } : null,
+        } : () => openKeySettings(ctx),
       }, PROVIDERS[p].label, has ? (on ? h("span", { class: "tick" }, "✓") : null) : h("span", { class: "nokey-tag" }, "no key"));
     }));
   // per-selected-model tier dropdowns
@@ -160,9 +169,8 @@ export async function runReview(ctx, query) {
   const provider = prefs.provider;
   const key = prefs.keys[provider];
   if (!key || !key.trim()) {
-    toast("Add an API key in Preferences first");
-    app.prefsOpen = true;
-    rerender();
+    toast("Add an API key in Settings first");
+    openKeySettings(ctx);
     return;
   }
   const model = zoneModel(prefs, "wi");
@@ -189,7 +197,7 @@ export async function runReview(ctx, query) {
     try {
       ({ refined, expansions } = await refineQuery({ query, profile, prefs, provider, key, model }));
     } catch (e) {
-      if (isAuthError(e)) throw new Error(e.message + " — the API key was rejected; check it in Preferences");
+      if (isAuthError(e)) throw new Error(e.message + " — the API key was rejected; check it in Settings");
       run.refineNote = "refinement unavailable (" + e.message + ") — searched with the original phrasing";
     }
     run.isStage = 2;
@@ -211,7 +219,7 @@ export async function runReview(ctx, query) {
   } catch (e) {
     console.error(e);
     run.isRunning = false; run.isStage = 0; run.isProgress = null;
-    run.isError = isAuthError(e) ? e.message + " — the API key was rejected; check it in Preferences" : e.message;
+    run.isError = isAuthError(e) ? e.message + " — the API key was rejected; check it in Settings" : e.message;
   }
   rerender();
 }
@@ -300,9 +308,8 @@ export function startOutside(ctx) {
   }
   const prefs = store.getPrefs();
   if (!keyedProviders(prefs).length) {
-    toast("Add an API key in Preferences first");
-    app.prefsOpen = true;
-    rerender();
+    toast("Add an API key in Settings first");
+    openKeySettings(ctx);
     return;
   }
   if (!selectedOutsideProviders(prefs).length) {
@@ -614,7 +621,7 @@ function withinZone(ctx) {
         }, prestige ? "Prestige ranking: on" : "Prestige ranking: off")),
       !run.isRunning && pickerRow(ctx, "wi"),
       !run.isRunning && !keyedProviders(prefs).length && h("div", { class: "wi-nokey-note" },
-        "The reviewer models are disabled until you add an API key in Preferences."),
+        "The reviewer models are disabled until you add an API key in Settings."),
       bodyEl));
 }
 
@@ -733,7 +740,7 @@ function outsideZone(ctx) {
             onclick: () => { savePrefs({ outsideEnabled: !auto }); ctx.rerender(); } },
             auto ? "✓ auto-runs with each review" : "auto-run with each review: off")),
         !anyKey && h("div", { class: "os-nokey-note" },
-          "Add an API key in Preferences to search the web with an LLM."),
+          "Add an API key in Settings to search the web with an LLM."),
         anyKey && !selected.length && h("div", { class: "os-nokey-note" },
           "Select at least one model above to search."),
         run.outError && h("div", { class: "stage-err" }, "Web search failed — " + run.outError),

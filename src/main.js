@@ -1,12 +1,12 @@
 // Backward · Main · Forward — entry point and app shell.
 // Owns: theme, routing (onboarding ↔ app), the top nav (stream switcher,
-// Backward·Main·Forward crumbs, preferences), the floating direction arrows,
+// Backward·Main·Forward crumbs, settings), the floating direction arrows,
 // the inbound fragment receiver, and the render loop. Views live in
 // review.js (main mode) and graph.js (backward/forward modes).
 import "./style.css";
 import { h, toast, MAC_APP_URL } from "./ui.js";
 import * as store from "./store.js";
-import { renderOnboard } from "./onboard.js";
+import { renderOnboard, KEYS_STEP } from "./onboard.js";
 import { renderReview } from "./review.js";
 import { renderGraph, ensureGraph } from "./graph.js";
 import { parseInbound } from "./handoff.js";
@@ -23,6 +23,7 @@ const app = {
   mode: "main", // main | back | fwd
   streamOpen: false,
   prefsOpen: false,
+  prefsStep: 0,               // which step the Settings modal opens on (deep-link)
   accountOpen: false,
   noticeOpen: false,          // one-time local-storage caution (guest path)
   status: null, // public/data/status.json — corpus stats for the idle card
@@ -215,9 +216,9 @@ function nav(stream) {
         syncNavButton(() => { app.accountOpen = true; render(); }),
         h("button", { class: "nav-btn nav-help", title: "How this works — take the quick tour",
           onclick: () => startTour(ctx()) }, "?"),
-        h("button", { class: "nav-btn nav-prefs", title: "Preferences",
-          onclick: () => { app.prefsOpen = true; render(); } },
-          `${initial} · Preferences`),
+        h("button", { class: "nav-btn nav-prefs", title: "Settings",
+          onclick: () => { app.prefsOpen = true; app.prefsStep = 0; render(); } },
+          `${initial} · Settings`),
         themeButton())));
 }
 
@@ -252,19 +253,29 @@ function prefsModal() {
   // Backdrop click and Escape both go through the dirty check — dismissing
   // the modal must never silently discard edits.
   const tryClose = () => {
-    if (api.isDirty() && !confirm("Discard unsaved preference changes?")) return;
+    if (api.isDirty() && !confirm("Discard unsaved settings changes?")) return;
     app.prefsOpen = false; render();
   };
   const overlay = h("div", { class: "modal-overlay",
     onclick: (e) => { if (e.target === overlay) tryClose(); } });
-  const wrap = h("div", { role: "dialog", "aria-modal": "true", "aria-label": "Preferences" });
+  const wrap = h("div", { role: "dialog", "aria-modal": "true", "aria-label": "Settings" });
   overlay.append(wrap);
   const api = renderOnboard(wrap, {
     mode: "edit",
-    onDone: () => { app.prefsOpen = false; toast("Preferences saved"); render(); },
+    initialStep: app.prefsStep,
+    onDone: () => { app.prefsOpen = false; toast("Settings saved"); render(); },
     onCancel: tryClose,
   });
-  setPrefsKeyHandler((e) => { if (e.key === "Escape") tryClose(); });
+  // Escape closes; ← / → walk the steps — but never while the caret is in a
+  // text field or a select (there the arrows belong to the control itself).
+  setPrefsKeyHandler((e) => {
+    if (e.key === "Escape") { tryClose(); return; }
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+    e.preventDefault();
+    (e.key === "ArrowLeft" ? api.prev : api.next)();
+  });
   requestAnimationFrame(() => wrap.querySelector("input, select, textarea, button")?.focus());
   return overlay;
 }
@@ -398,7 +409,7 @@ const bootHandoff = receiveHandoff();
 window.addEventListener("hashchange", () => receiveHandoff({ rerender: true }));
 
 // Another app tab changed the store (captured session, finished review, edited
-// prefs) — refresh this one. Skipped mid-onboarding / with the preferences
+// prefs) — refresh this one. Skipped mid-onboarding / with the settings
 // modal open so in-progress edits aren't clobbered; the store cache is already
 // invalidated, so the next render picks the changes up regardless.
 store.onExternalChange(() => {
