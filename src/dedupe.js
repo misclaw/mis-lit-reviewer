@@ -116,6 +116,7 @@ export function mergePapers(a, b) {
     cited: a.cited ?? b.cited ?? null,
     abstract: longer(a.abstract, b.abstract) || null,
     summary: longer(a.summary, b.summary),
+    points: (Array.isArray(a.points) && a.points.length) ? a.points : (b.points || []),
     rationale: longer(a.rationale, b.rationale),
     discipline: a.discipline || b.discipline || "",
     sources,

@@ -93,9 +93,10 @@ export async function rerank({ query, refined, candidates, profile, prefs, provi
     system:
       `From the ${candidates.length} candidate papers, select and rank the ${n} most relevant to the research question. ` +
       "Judge by conceptual fit — theory, constructs, phenomenon, method — not by citation count. " +
-      "Present each like a Google Scholar Labs answer: one plain sentence, then two short bullet points. " +
+      "Present each like a Google Scholar Labs answer: one plain sentence, then two bullet points, each led by a " +
+      "short bold key phrase. " +
       "Reply with JSON only: {\"picks\": [{\"i\": <candidate index>, \"summary\": <one sentence summarizing the paper>, " +
-      "\"points\": [<two short bullets on why it matters for THIS question — key contribution, finding, or link>]}]} " +
+      "\"points\": [{\"term\": <2–4 word key phrase>, \"desc\": <short clause on why it matters for THIS question>}]}]} " +
       `— exactly ${n} picks (fewer only if fewer are genuinely relevant), most relevant first; exactly two points each.`,
     user: `${profileBlurb(profile, prefs)}\n\nResearch question: ${query}\nRefined phrasing: ${refined}\n\nCandidates:\n\n${listing}`,
   });
@@ -118,10 +119,34 @@ export async function rerank({ query, refined, candidates, profile, prefs, provi
   return results;
 }
 
-// Normalize an LLM "points" field to at most two clean bullet strings.
+// Normalize a "points" field to ≤2 {term, desc} bullets. Accepts the current
+// {term, desc} objects, and legacy plain strings (splitting a short "Term: …"
+// lead into term/desc, else keeping the whole string as the description).
 export function cleanPoints(raw) {
   if (!Array.isArray(raw)) return [];
-  return raw.map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean).slice(0, 2);
+  const out = [];
+  for (const item of raw) {
+    let pt = null;
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const term = typeof item.term === "string" ? item.term.replace(/\*\*/g, "").trim() : "";
+      const desc = typeof item.desc === "string" ? item.desc.trim() : "";
+      if (term || desc) pt = { term, desc };
+    } else if (typeof item === "string" && item.trim()) {
+      pt = splitPoint(item.trim());
+    }
+    if (pt) out.push(pt);
+    if (out.length >= 2) break;
+  }
+  return out;
+}
+function splitPoint(s) {
+  const i = s.indexOf(":");
+  if (i > 0 && i <= 42) {
+    const term = s.slice(0, i).replace(/\*\*/g, "").trim();
+    const desc = s.slice(i + 1).trim();
+    if (term && desc && term.split(/\s+/).length <= 6) return { term, desc };
+  }
+  return { term: "", desc: s.replace(/\*\*/g, "") };
 }
 
 // ---- prestige ranking: user's primary venues first, then secondary, then rest;
@@ -149,10 +174,10 @@ export const OUTSIDE_PROMPT_DEFAULT =
   "Use your web search tool to find real, verifiable academic papers relevant to the research question, " +
   "drawing on the full breadth of the scholarly literature across every relevant discipline. Never invent a paper — " +
   "every entry must come from something you actually found. Present each like a Google Scholar Labs answer: " +
-  "one sentence, then two short bullet points. Reply with JSON only:\n" +
+  "one sentence, then two bullet points each led by a short bold key phrase. Reply with JSON only:\n" +
   "{\"papers\": [{\"title\": str, \"authors\": str, \"venue\": str, \"year\": int, \"discipline\": str, " +
   "\"url\": str, \"doi\": str|null, \"summary\": <one sentence summary>, " +
-  "\"points\": [<two short bullets on why it matters for this question>]}]}\n" +
+  "\"points\": [{\"term\": <2–4 word key phrase>, \"desc\": <short clause on why it matters>}]}]}\n" +
   "— up to {n} papers, most relevant first; exactly two points each.";
 
 export async function searchOutside({ query, profile, prefs, provider, key, model, prompt }, n = 8) {
@@ -305,9 +330,10 @@ export async function describeImports({ papers, query, profile, prefs, provider,
     maxTokens: 4000,
     system:
       "A researcher imported these papers into a literature review. Present each like a Google Scholar Labs " +
-      "answer: a one-sentence summary of the paper, then two short bullet points on why it matters for the " +
-      "research question; also name its home discipline. " +
-      "Reply with JSON only: {\"items\": [{\"i\": <index>, \"summary\": str, \"points\": [str, str], \"discipline\": str}]} " +
+      "answer: a one-sentence summary of the paper, then two bullet points each led by a short bold key phrase " +
+      "on why it matters for the research question; also name its home discipline. " +
+      "Reply with JSON only: {\"items\": [{\"i\": <index>, \"summary\": str, " +
+      "\"points\": [{\"term\": <2–4 word key phrase>, \"desc\": <short clause>}], \"discipline\": str}]} " +
       "— one item per paper, same indices; exactly two points each.",
     user: `${profileBlurb(profile, prefs)}\n\nResearch question: ${query}\n\nImported papers:\n\n${listing}`,
   });

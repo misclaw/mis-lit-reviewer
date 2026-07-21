@@ -8,7 +8,7 @@ import * as store from "./store.js";
 import { collectBackward, collectForward, screenCandidates } from "./citegraph.js";
 import { venueAbbr } from "./pipeline.js";
 import { resolveModel } from "./llm.js";
-import { paperCard, gridLayoutClass, normPoints } from "./review.js";
+import { paperCard, gridLayoutClass, normPoints, pointText, fmtAuthors } from "./review.js";
 import { openPaperModal } from "./paper-modal.js";
 import { exportRow } from "./export.js";
 
@@ -100,9 +100,9 @@ function gCard(p, { main = false, x, y, hClamp, sel = false, linkNote, onClick, 
             onclick: (e) => e.stopPropagation() }, p.title)
         : h("a", {}, p.title)),
     h("div", { class: "gm" },
-      (typeof p.authors === "string" ? p.authors : (p.authors || []).slice(0, 4).join(", ")),
+      fmtAuthors(p.authors, 60),
       " · ", h("strong", {}, venueAbbr(p.venue)), p.year ? ` · ${p.year}` : ""),
-    h("div", { class: "gr" }, normPoints(p)[0] || p.rationale || p.summary || ""),
+    h("div", { class: "gr" }, pointText(normPoints(p)[0]) || p.rationale || p.summary || ""),
     h("div", { class: "gf" },
       h("span", {}, linkNote),
       fmtCites(p.cited) != null && h("span", {}, `Cited by ${fmtCites(p.cited)}`),

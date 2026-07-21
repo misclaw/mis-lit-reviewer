@@ -7,7 +7,7 @@
 // then OpenAlex id, then a title search) and — via the optional `persist`
 // callback — writes it back onto the stored paper so it's held for next time.
 import { h, fmtCites } from "./ui.js";
-import { reconstructAbstract, venuePub, venueAbbr } from "./pipeline.js";
+import { reconstructAbstract, venuePub, venueAbbr, cleanPoints } from "./pipeline.js";
 import { sourcesOf, recommendersOf } from "./dedupe.js";
 
 const MAILTO = "gwonedgar@gmail.com";
@@ -132,10 +132,11 @@ export function openPaperModal(paper, { accent = "wi", persist = null } = {}) {
       metaRow("Provenance", provParts.length ? provParts.join("  ·  ") : null)),
     paper.summary && h("div", { class: "pm-summary" }, h("span", { class: "pm-lab" }, "Summary"), paper.summary),
     (() => {
-      const pts = Array.isArray(paper.points) ? paper.points.filter((x) => typeof x === "string" && x.trim()).slice(0, 2) : [];
+      const pts = cleanPoints(paper.points);
       if (pts.length) return h("div", { class: "pm-rationale" },
         h("span", { class: "pm-lab" }, "Why relevant"),
-        h("ul", { class: "pm-points" }, pts.map((pt) => h("li", {}, pt))));
+        h("ul", { class: "pm-points" }, pts.map((pt) =>
+          h("li", {}, pt.term ? [h("strong", {}, pt.term), ": ", pt.desc] : pt.desc))));
       if (paper.rationale) return h("div", { class: "pm-rationale" },
         h("span", { class: "pm-lab" }, "Why relevant"), paper.rationale);
       return null;

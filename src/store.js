@@ -24,6 +24,7 @@ const DEFAULT_PREFS = () => ({
   models: { wi: {}, os: {} }, // per-zone, per-provider model choice {wi: {anthropic: "claude-…"}, os: {…}}
   outsidePrompt: "",      // custom outside-IS system prompt ("" = built-in default)
   layout: "one",          // result columns: "one" (Google-Scholar-style, default) | "two"
+  hideRefined: false,     // collapse the "Refined query · stats" line under the within-IS results
 });
 
 const EMPTY = () => ({

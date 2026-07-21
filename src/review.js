@@ -8,7 +8,7 @@ import { PROVIDERS, resolveModel, modelLabel, isAuthError } from "./llm.js";
 import { exportRow } from "./export.js";
 import {
   refineQuery, similarityFilter, rerank, prestigeSort, searchOutside, resolvePapers,
-  describeImports, venuePub, VENUES, OUTSIDE_PROMPT_DEFAULT,
+  describeImports, venuePub, VENUES, OUTSIDE_PROMPT_DEFAULT, cleanPoints,
 } from "./pipeline.js";
 import { dedupeInto, dropWithinOverlap, sourcesOf, recommendersOf, channelsOf } from "./dedupe.js";
 import { openPaperModal } from "./paper-modal.js";
@@ -440,22 +440,57 @@ function stageCard(stages, current, { os = false, error = null } = {}) {
     error && h("div", { class: "stage-err" }, error));
 }
 
-// Google Scholar Labs presentation: two short bullet points on relevance.
-// Falls back to the older single "Why relevant" sentence for papers reviewed
-// before points existed.
-export function normPoints(p) {
-  const pts = Array.isArray(p.points) ? p.points.filter((x) => typeof x === "string" && x.trim()).slice(0, 2) : [];
-  return pts;
-}
+// Google Scholar Labs presentation: two bullet points, each a bold key phrase
+// + short description. Falls back to the older single "Why relevant" sentence
+// for papers reviewed before points existed. normPoints yields {term, desc}.
+export const normPoints = (p) => cleanPoints(p.points);
+export const pointText = (pt) => (pt ? (pt.term ? `${pt.term}: ${pt.desc}` : pt.desc) : "");
 function pointsBlock(p) {
   const pts = normPoints(p);
-  if (pts.length) return h("ul", { class: "p-points" }, pts.map((pt) => h("li", {}, pt)));
+  if (pts.length) return h("ul", { class: "p-points" },
+    pts.map((pt) => h("li", {}, pt.term ? [h("strong", {}, pt.term), ": ", pt.desc] : pt.desc)));
   if (p.rationale) return h("div", { class: "p-rationale" }, h("strong", {}, "Why relevant: "), p.rationale);
   return null;
 }
 
+// Trim a long author list by total length, cutting at an author boundary and
+// appending "et al." — keeps the meta line from dominating a card.
+export function fmtAuthors(authors, max = 100) {
+  const s = typeof authors === "string" ? authors : (authors || []).join(", ");
+  if (s.length <= max) return s;
+  const names = s.split(/,\s*/);
+  let out = "";
+  for (const n of names) {
+    const next = out ? out + ", " + n : n;
+    if (next.length > max && out) break;
+    out = next;
+  }
+  return (out || names[0]) + " et al.";
+}
+
 // Result columns: default one column (Google-Scholar-style), opt-in two.
 export const gridLayoutClass = () => (store.getPrefs().layout === "two" ? "results-grid cols-2" : "results-grid");
+const isOneCol = () => store.getPrefs().layout !== "two";
+
+// The "Refined query · N abstracts → 100 → reranked" line. Collapsible (its
+// width is capped + centered in one-column mode so it doesn't sprawl above the
+// centered result column).
+function refinedLine(ctx, stream) {
+  const { app, run } = ctx;
+  const prefs = store.getPrefs();
+  const cls = `refined-line${isOneCol() ? " narrow" : ""}`;
+  const toggle = h("button", { class: "refined-toggle", "aria-expanded": String(!prefs.hideRefined),
+    title: prefs.hideRefined ? "Show refined query & stats" : "Hide refined query & stats",
+    onclick: () => { savePrefs({ hideRefined: !prefs.hideRefined }); ctx.rerender(); } },
+    prefs.hideRefined ? "▸ Refined query" : "▾");
+  if (prefs.hideRefined) return h("div", { class: cls + " collapsed" }, toggle);
+  return h("div", { class: cls },
+    toggle, " Refined query: ", h("em", {}, `“${stream.refined || stream.query}”`),
+    stream.expansions?.length ? [" · expansions: ", h("em", {}, stream.expansions.join(" · "))] : "",
+    ` · ${fmtCites(app.status?.totals?.searchable) || "the"} abstracts → 100 by similarity → `,
+    h("strong", {}, `${stream.within.length} reranked`),
+    run.refineNote ? h("span", { style: { color: "var(--danger)" } }, ` · ${run.refineNote}`) : "");
+}
 export function layoutToggle(ctx) {
   const cur = store.getPrefs().layout === "two" ? "two" : "one";
   const set = (v) => { savePrefs({ layout: v }); ctx.rerender(); };
@@ -466,7 +501,7 @@ export function layoutToggle(ctx) {
 }
 
 export function paperCard(p, { variant, rank = null, badge = null, cross = null, ctx = null }) {
-  const authors = typeof p.authors === "string" ? p.authors : (p.authors || []).join(", ");
+  const authors = fmtAuthors(p.authors);
   const cites = fmtCites(p.cited);
   const pub = venuePub(p.venue);
   // a record that resisted resolution may have no title — show its identifier
@@ -528,12 +563,7 @@ function withinZone(ctx) {
     bodyEl = [
       run.isError && h("div", { class: "stage-err banner", role: "alert" },
         "Review failed — " + run.isError + " · your previous results below are unchanged"),
-      h("div", { class: "refined-line" },
-        "Refined query: ", h("em", {}, `“${stream.refined || stream.query}”`),
-        stream.expansions?.length ? [" · expansions: ", h("em", {}, stream.expansions.join(" · "))] : "",
-        ` · ${fmtCites(app.status?.totals?.searchable) || "the"} abstracts → 100 by similarity → `,
-        h("strong", {}, `${stream.within.length} reranked`),
-        run.refineNote ? h("span", { style: { color: "var(--danger)" } }, ` · ${run.refineNote}`) : ""),
+      refinedLine(ctx, stream),
       h("div", { class: gridLayoutClass() },
         list.map((p, i) => paperCard(p, {
           variant: "wi", rank: i + 1, ctx,
@@ -708,7 +738,7 @@ function outsideZone(ctx) {
         h("div", { class: "os-method os-method-llm" },
           h("div", { class: "m-head" },
             h("div", { class: "t" }, "LLM web search"),
-            h("div", { class: "s" }, "Every AI you've connected searches the web in parallel; results are merged and de-duplicated")),
+            h("div", { class: "s" }, "Each connected model searches the web in parallel — results merged & deduplicated.")),
           llmBody),
         extPanel(ctx)),
       progressBanner(run.outProgress, true),
@@ -785,7 +815,7 @@ function extPanel(ctx) {
         "Reload this page, then click “Verify installation”",
       ];
   const setup = detected
-    ? h("div", { class: "ext-status ok" }, `✓ Extension detected (v${detected}) — run your question on a tool below and click “Send to Paper Trails” there.`)
+    ? h("div", { class: "ext-status ok" }, `✓ Extension detected (v${detected}) — run a tool below, then click “Send to Paper Trails”.`)
     : h("div", { class: "ext-setup" },
         h("div", { class: "ext-status" },
           "Extension not detected in this browser. It works in Chrome and Firefox and installs manually — " +
@@ -816,7 +846,7 @@ function extPanel(ctx) {
     h("div", { class: "m-head" },
       h("div", { class: "t" }, "External literature tools"),
       h("div", { class: "s" },
-        "Run your question on the tools below; the extension sends their results back here — nothing goes through any server.")),
+        "Run your question on a tool below; results come straight back here — no server.")),
     setup,
     launcher,
     // Active suggestions: captured searches that match the current question.
