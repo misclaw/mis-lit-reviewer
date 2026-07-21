@@ -13,14 +13,19 @@ cd extension && rm -f ../paper-trails-bridge.zip && zip -qr ../paper-trails-brid
 npx addons-linter ../paper-trails-bridge.zip   # expect 0 errors / 0 warnings
 ```
 
-Current version: **0.5.2**. Privacy policy URL (same for both stores):
+Current version: **0.5.4**. Privacy policy URL (same for both stores):
 **https://paper-trails.misclaw.app/privacy** (also resolves at the former
 alias https://mis-lit-reviewer.misclaw.app/privacy).
+
+**Live on the Chrome Web Store:**
+https://chromewebstore.google.com/detail/paper-trails-bridge/limegkoddehgnlanihimnhflbcfdceom
 
 Screenshots (1280×800 JPEG) are in `../store-assets/`; suggested order:
 `1-scholar-button` → `2-session-received` → `4-imported-collection` → `3-workbench`.
 
-Store icon: `icons/icon128.png` (128×128).
+Store icon: `icons/icon128.png` (128×128) — the misclaw logo (the red "MIS"
+lobster on the brand card). Re-upload it on the dashboard's "Store listing" tab
+when refreshing the listing; the packaged manifest also references it.
 
 ---
 
@@ -33,15 +38,22 @@ Store icon: `icons/icon128.png` (128×128).
 
 **Detailed description:**
 
-> Paper Trails Bridge connects the literature-search tools you already use to
-> **Paper Trails** — a Backward · Main · Forward literature-review workbench for
-> Information Systems scholars (paper-trails.misclaw.app).
+> Paper Trails Bridge connects the natural-language literature-search tools you
+> already use to **Paper Trails** — a Backward · Main · Forward literature-review
+> workbench for Information Systems scholars (paper-trails.misclaw.app).
+>
+> Rigorous literature reviews shouldn't be limited to one search method. Paper
+> Trails runs its own IS-corpus pipeline, but the wider literature lives across
+> tools like Google Scholar Labs, Asta, Paper Digest, and SciSpace — each strong
+> at a different kind of query. This bridge lets you pull results from all of them
+> into one workspace, so you cover more ground, avoid reinventing the wheel, and
+> review the literature more thoroughly instead of trusting any single engine.
 >
 > On a supported search site — Google Scholar / Scholar Labs, Asta (Ai2), Paper
 > Digest, or SciSpace — a floating "◀ · ▶ Send to Paper Trails" button appears.
 > Click it and the extension reads the papers on the page (titles, authors,
 > venues, links, and any snippets), then opens Paper Trails with that session
-> ready to import into a review stream.
+> ready to import into a review stream, deduplicated against what you already have.
 >
 > Nothing goes through a server. The results travel directly from one browser
 > tab to another, encoded in the page URL, and land in Paper Trails' local
@@ -108,5 +120,8 @@ Submit at https://addons.mozilla.org → Developer Hub → Submit a New Add-on �
 
 ## After a listing goes live
 
-Swap the in-app "Get the extension (GitHub) ↗" button to point at the store
-page(s): `EXT_REPO_URL` / `TOOLS` area in `src/review.js`.
+Done for Chrome: `src/review.js` (`extPanel`) now shows an **"Add to Chrome —
+Web Store ↗"** button (`EXT_STORE_URL`) to Chromium users, with the manual
+load-unpacked steps tucked behind a disclosure. Firefox users still get the
+temporary-add-on-from-GitHub flow — the **AMO listing is under review**; once it's
+approved, swap that branch to the AMO install link.

@@ -12,7 +12,7 @@ import { renderGraph, ensureGraph } from "./graph.js";
 import { parseInbound } from "./handoff.js";
 import { startTour } from "./tour.js";
 import * as sync from "./sync.js";
-import { syncNavButton, accountModal, storageNoticeModal } from "./account.js";
+import { authNavButton, accountModal, storageNoticeModal } from "./account.js";
 
 const root = document.getElementById("app");
 
@@ -24,6 +24,7 @@ const app = {
   streamOpen: false,
   prefsOpen: false,
   prefsStep: 0,               // which step the Settings modal opens on (deep-link)
+  prefsFocusProvider: null,   // which provider's key input to focus on open (deep-link)
   accountOpen: false,
   noticeOpen: false,          // one-time local-storage caution (guest path)
   status: null, // public/data/status.json — corpus stats for the idle card
@@ -181,8 +182,6 @@ function streamMenu(stream) {
 
 function nav(stream) {
   const ready = !!stream.within?.length;
-  const profile = store.getProfile();
-  const initial = (profile.name || "A")[0].toUpperCase();
   return h("div", { class: "nav" },
     h("div", { class: "nav-inner" },
       h("div", { class: "wordmark" }, "Paper Trails"),
@@ -199,26 +198,31 @@ function nav(stream) {
             disabled: m !== "main" && !ready,
             onclick: () => actions.goMode(m) }, label))),
       h("div", { class: "nav-spacer" }),
-      sync.getState().user
-        ? h("div", { class: "privacy",
-            title: "Your research activity syncs to a private row only your account can read. " +
-              "LLM API keys never sync — they stay in this browser. " +
-              "AI requests go directly to the provider you chose, with your key." },
-            h("span", { class: "dot" }), "Synced · private to your account")
-        : h("div", { class: "privacy",
-            title: "Your research activity — questions, streams, results — is stored only in this browser. " +
-              "AI requests (your question + researcher profile) go directly to the provider you chose, with your key. " +
-              "Production pages load Google Analytics for anonymous page-view stats." },
-            h("span", { class: "dot" }), "Research data stays in this browser"),
+      // Signed in, sync is automatic and the "Sign out" button says as much, so
+      // the passive status chip only earns its place signed-out — as the
+      // local-only reassurance.
+      !sync.getState().user &&
+        h("div", { class: "privacy",
+          title: "Your research activity — questions, streams, results — is stored only in this browser. " +
+            "AI requests (your question + researcher profile) go directly to the provider you chose, with your key. " +
+            "Production pages load Google Analytics for anonymous page-view stats." },
+          h("span", { class: "dot" }), "Research data stays in this browser"),
       // Keep the action controls together so the theme toggle can't wrap to a
       // second line on its own — the whole group moves as a unit if it must.
       h("div", { class: "nav-actions" },
-        syncNavButton(() => { app.accountOpen = true; render(); }),
+        authNavButton({
+          onSignIn: () => { app.accountOpen = true; render(); },
+          onSignOut: async () => {
+            try { await sync.signOut(); toast("Signed out — your work stays in this browser"); }
+            catch (e) { toast("Sign out failed: " + e.message); }
+            render();
+          },
+        }),
         h("button", { class: "nav-btn nav-help", title: "How this works — take the quick tour",
           onclick: () => startTour(ctx()) }, "?"),
         h("button", { class: "nav-btn nav-prefs", title: "Settings",
-          onclick: () => { app.prefsOpen = true; app.prefsStep = 0; render(); } },
-          `${initial} · Settings`),
+          onclick: () => { app.prefsOpen = true; app.prefsStep = 0; app.prefsFocusProvider = null; render(); } },
+          "Settings"),
         themeButton())));
 }
 
@@ -276,7 +280,20 @@ function prefsModal() {
     e.preventDefault();
     (e.key === "ArrowLeft" ? api.prev : api.next)();
   });
-  requestAnimationFrame(() => wrap.querySelector("input, select, textarea, button")?.focus());
+  // Deep-linked from a keyless provider chip: land the caret in THAT provider's
+  // key input (and flash its row) rather than the generic first field.
+  requestAnimationFrame(() => {
+    const target = app.prefsFocusProvider &&
+      wrap.querySelector(`.key-row input[data-prov="${app.prefsFocusProvider}"]`);
+    if (target) {
+      target.focus();
+      const row = target.closest(".key-row");
+      row?.classList.add("flash");
+      setTimeout(() => row?.classList.remove("flash"), 1400);
+    } else {
+      wrap.querySelector("input, select, textarea, button")?.focus();
+    }
+  });
   return overlay;
 }
 

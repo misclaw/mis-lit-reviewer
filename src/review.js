@@ -12,13 +12,16 @@ import {
 } from "./pipeline.js";
 import { dedupeInto, dropWithinOverlap, sourcesOf, recommendersOf, channelsOf } from "./dedupe.js";
 import { openPaperModal } from "./paper-modal.js";
+import { openCorpusPeek } from "./corpus-peek.js";
 import { KEYS_STEP } from "./onboard.js";
 
 // Deep-link into the Settings modal's API-keys step (e.g. from a keyless
-// provider chip, or when a run is attempted with no key configured).
-function openKeySettings(ctx) {
+// provider chip, or when a run is attempted with no key configured). When a
+// provider is given, the modal lands the caret in THAT provider's key input.
+function openKeySettings(ctx, provider = null) {
   ctx.app.prefsOpen = true;
   ctx.app.prefsStep = KEYS_STEP;
+  ctx.app.prefsFocusProvider = provider;
   ctx.rerender();
 }
 
@@ -71,7 +74,7 @@ function pickerRow(ctx, zone) {
         onclick: has ? () => {
           savePrefs(zone === "wi" ? { provider: p } : { outsideProvider: p });
           ctx.rerender();
-        } : () => openKeySettings(ctx),
+        } : () => openKeySettings(ctx, p),
       }, PROVIDERS[p].label, has ? null : h("span", { class: "nokey-tag" }, "no key"));
     }),
     h("select", { class: "model-select",
@@ -111,7 +114,7 @@ function outsidePicker(ctx) {
           const next = new Set(selectedOutsideProviders(prefs));
           next.has(p) ? next.delete(p) : next.add(p);
           setSelection(next);
-        } : () => openKeySettings(ctx),
+        } : () => openKeySettings(ctx, p),
       }, PROVIDERS[p].label, has ? (on ? h("span", { class: "tick" }, "✓") : null) : h("span", { class: "nokey-tag" }, "no key"));
     }));
   // per-selected-model tier dropdowns
@@ -170,7 +173,7 @@ export async function runReview(ctx, query) {
   const key = prefs.keys[provider];
   if (!key || !key.trim()) {
     toast("Add an API key in Settings first");
-    openKeySettings(ctx);
+    openKeySettings(ctx, provider);
     return;
   }
   const model = zoneModel(prefs, "wi");
@@ -610,7 +613,11 @@ function withinZone(ctx) {
     h("div", { class: "zone-inner" },
       h("div", { class: "zone-head" },
         h("div", { class: "zone-title" }, "Within IS"),
-        h("div", { class: "zone-sub" }, "Curated IS corpus — basket journals + major IS conferences, crawled daily"),
+        h("button", { class: "zone-sub zone-sub-btn",
+          title: "See recent papers the daily crawl added",
+          onclick: () => openCorpusPeek() },
+          "Curated IS corpus — basket journals + major IS conferences, crawled daily",
+          h("span", { class: "zone-sub-cue" }, "see recent ↗")),
         h("div", { class: "spacer" }),
         done && layoutToggle(ctx),
         done && exportRow(prestige ? prestigeSort(stream.within, prefs) : stream.within, "within-is-review"),
@@ -776,6 +783,7 @@ function timeAgo(iso) {
 // The extension's presence script stamps this attribute on our origin.
 const extVersion = () => document.documentElement.dataset.ptExtension || null;
 
+const EXT_STORE_URL = "https://chromewebstore.google.com/detail/paper-trails-bridge/limegkoddehgnlanihimnhflbcfdceom";
 const EXT_REPO_URL = "https://github.com/misclaw/mis-lit-reviewer/tree/main/extension";
 const TOOLS = [
   { name: "Google Scholar Labs", url: (q) => "https://scholar.google.com/scholar_labs/search" + (q ? "?q=" + encodeURIComponent(q) : "") },
@@ -831,27 +839,45 @@ function extPanel(ctx) {
         "Click “Load unpacked” and select the extension/ folder",
         "Reload this page, then click “Verify installation”",
       ];
+  const verifyBtn = h("button", { class: "btn btn-sm",
+    onclick: () => {
+      if (extVersion()) { toast("Extension detected ✓"); ctx.rerender(); }
+      else toast("Not detected yet — after installing it, reload this page and verify again");
+    } }, "Verify installation");
+  // Chrome users install from the Web Store (published); Firefox loads the folder
+  // as a temporary add-on from GitHub (no AMO listing yet). The manual dev-install
+  // steps stay available on Chrome too, tucked behind a disclosure.
   const setup = detected
     ? h("div", { class: "ext-status ok" }, `✓ Extension detected (v${detected}) — run a tool below, then click “Send to Paper Trails”.`)
-    : h("div", { class: "ext-setup" },
-        h("div", { class: "ext-status" },
-          "Extension not detected in this browser. It works in Chrome and Firefox and installs manually — " +
-          "download it from GitHub, then follow the 4 quick steps below. " +
-          "After that, results from the tools flow back here with one click."),
-        h("div", { class: "ext-actions" },
-          h("a", { class: "btn-import", href: EXT_REPO_URL, target: "_blank", rel: "noopener" },
-            "Get the extension (GitHub) ↗"),
-          h("button", { class: "btn btn-sm",
-            onclick: () => {
-              if (extVersion()) { toast("Extension detected ✓"); ctx.rerender(); }
-              else toast("Not detected yet — after loading it, reload this page and verify again");
-            } }, "Verify installation")),
-        h("details", { class: "ext-paste", open: true },
-          h("summary", {}, isFirefox ? "Install steps (Firefox)" : "Install steps (Chrome)"),
-          h("ol", { class: "ext-steps" }, steps.map((s) => h("li", {}, s))),
-          isFirefox && h("div", { class: "ext-note" },
-            "Firefox removes temporary add-ons when it quits — reload it after a restart. " +
-            "If the button doesn't show on a tool site, grant site access under about:addons → Permissions.")));
+    : isFirefox
+      ? h("div", { class: "ext-setup" },
+          h("div", { class: "ext-status" },
+            "Extension not detected in this browser. A one-click Firefox Add-ons listing is under " +
+            "review; in the meantime it loads as a temporary add-on — download it from GitHub, then " +
+            "follow the 4 quick steps below. After that, results from the tools flow back here with one click."),
+          h("div", { class: "ext-actions" },
+            h("a", { class: "btn-import", href: EXT_REPO_URL, target: "_blank", rel: "noopener" },
+              "Get the extension (GitHub) ↗"),
+            verifyBtn),
+          h("details", { class: "ext-paste", open: true },
+            h("summary", {}, "Install steps (Firefox)"),
+            h("ol", { class: "ext-steps" }, steps.map((s) => h("li", {}, s))),
+            h("div", { class: "ext-note" },
+              "Firefox removes temporary add-ons when it quits — reload it after a restart. " +
+              "If the button doesn't show on a tool site, grant site access under about:addons → Permissions.")))
+      : h("div", { class: "ext-setup" },
+          h("div", { class: "ext-status" },
+            "Extension not detected in this browser. Add Paper Trails Bridge from the Chrome Web Store — " +
+            "then run a tool below and click “Send to Paper Trails” to pull the results back here."),
+          h("div", { class: "ext-actions" },
+            h("a", { class: "btn-import", href: EXT_STORE_URL, target: "_blank", rel: "noopener" },
+              "Add to Chrome — Web Store ↗"),
+            verifyBtn),
+          h("details", { class: "ext-paste" },
+            h("summary", {}, "Prefer a developer install? (load unpacked)"),
+            h("ol", { class: "ext-steps" }, steps.map((s) => h("li", {}, s))),
+            h("div", { class: "ext-note" },
+              h("a", { href: EXT_REPO_URL, target: "_blank", rel: "noopener" }, "Get the source on GitHub ↗"))));
 
   const launcher = h("div", { class: "ext-launch" },
     h("div", { class: "lab" }, q ? "Run your research question on:" : "Open a tool (your question is prefilled once you run a review or web search):"),

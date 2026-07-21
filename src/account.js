@@ -12,26 +12,27 @@ const ago = (t) => {
   return Math.round(s / 3600) + " h ago";
 };
 
-function buttonFace(st) {
-  if (!st.user) return { label: "Sync off", cls: "", title: "Optional account sync — use Paper Trails on any device. Click to set up." };
-  if (st.status === "error") return { label: "Sync issue", cls: " err", title: "Sync error: " + (st.error || "unknown") + " — click for details" };
-  if (st.status === "syncing" || st.status === "linking") return { label: "Syncing…", cls: " on", title: "Pushing changes to your account" };
-  return { label: "Synced", cls: " on", title: `Signed in as ${st.user.email} — last synced ${ago(st.lastSyncAt) || "just now"}` };
+// Sync is automatic once signed in (sync.js pushes on every change, pulls on
+// focus + realtime), so the nav needs no manual sync control — just a sign-in /
+// sign-out toggle. It relabels itself in place on auth changes so a full app
+// re-render (which would drop input focus) isn't needed.
+let navBtn = null, navHandlers = null;
+function paintAuthBtn(st = sync.getState()) {
+  if (!navBtn) return;
+  const inn = !!st.user;
+  navBtn.textContent = inn ? "Sign out" : "Sign in";
+  navBtn.className = "nav-btn nav-auth" + (inn ? " on" : "");
+  navBtn.title = inn
+    ? `Signed in as ${st.user.email} — your workspace syncs automatically. Click to sign out (your work stays in this browser).`
+    : "Sign in to sync your workspace across devices. Optional — the app works fully signed-out.";
+  navBtn.onclick = inn ? navHandlers.onSignOut : navHandlers.onSignIn;
 }
+sync.onState((st) => { if (navBtn?.isConnected) paintAuthBtn(st); });
 
-let navBtn = null;
-sync.onState((st) => {
-  if (!navBtn?.isConnected) return;
-  const f = buttonFace(st);
-  navBtn.textContent = "⇅ " + f.label;
-  navBtn.className = "nav-btn nav-sync" + f.cls;
-  navBtn.title = f.title;
-});
-
-export function syncNavButton(onOpen) {
-  const f = buttonFace(sync.getState());
-  navBtn = h("button", { class: "nav-btn nav-sync" + f.cls, title: f.title, onclick: onOpen },
-    "⇅ " + f.label);
+export function authNavButton(handlers) {
+  navHandlers = handlers;
+  navBtn = h("button", { class: "nav-btn nav-auth" });
+  paintAuthBtn();
   return navBtn;
 }
 
@@ -62,7 +63,7 @@ export function storageNoticeModal({ onRegister, onContinue } = {}) {
         h("button", { class: "btn-ink", onclick: () => onRegister?.() }, "Create a free account"),
         h("button", { class: "btn", onclick: () => onContinue?.() }, "I understand — continue without one")),
       h("div", { class: "acct-note" },
-        "Not nagging you again — this is shown once. You can sign up any time from the ⇅ button in the top bar, " +
+        "Not nagging you again — this is shown once. You can sign up any time from the Sign in button in the top bar, " +
         "and Export data (JSON) in the stream menu is always there for manual backups.")));
   return overlay;
 }

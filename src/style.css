@@ -216,7 +216,7 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
    must, so the theme toggle never drops below the bar by itself */
 .nav-actions { display: flex; align-items: center; gap: 10px; flex: none; }
 /* when the bar gets tight, drop the verbose privacy pill first (it's also in the
-   ⇅ tooltip + account modal) so the controls keep their place on the bar */
+   account modal) so the controls keep their place on the bar */
 @media (max-width: 1120px) { .privacy { display: none; } }
 .privacy { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .privacy .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); display: inline-block; }
@@ -271,6 +271,17 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 .zone-sub { font-size: 13px; }
 .zone-is .zone-sub { color: var(--wi-sub); }
 .zone-os .zone-sub { color: var(--os-sub); }
+/* the Within-IS subtitle doubles as a button revealing recent corpus additions */
+.zone-sub-btn {
+  border: none; background: none; padding: 0; margin: 0; font-family: inherit;
+  cursor: pointer; text-align: left; display: inline-flex; align-items: baseline; gap: 8px;
+}
+.zone-sub-btn:hover { text-decoration: underline; text-underline-offset: 2px; }
+.zone-sub-cue {
+  font-size: 11px; font-weight: 600; text-decoration: none; white-space: nowrap;
+  color: var(--wi-accent); background: var(--wi-soft); border-radius: 999px; padding: 2px 8px;
+}
+.zone-sub-btn:hover .zone-sub-cue { text-decoration: none; }
 .zone-head .spacer { flex: 1; }
 
 /* corpus stats card (idle state) */
@@ -636,6 +647,13 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 .key-row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
 .key-row .kname { width: 92px; font-weight: 600; font-size: 13px; color: var(--muted); flex: none; }
 .key-row input { flex: 1; font-family: monospace; font-size: 13px; padding: 9px 12px; }
+/* deep-link flash: when a keyless provider chip sends you here, briefly ring the
+   matching row's input so it's obvious which key to add */
+.key-row.flash input { animation: keyFlash 1.4s ease-out; }
+@keyframes keyFlash {
+  0%, 40% { border-color: var(--wi-accent); box-shadow: 0 0 0 3px var(--wi-glow, rgba(59, 91, 219, 0.25)); }
+  100% { box-shadow: 0 0 0 3px transparent; }
+}
 .key-err { flex-basis: 100%; font-size: 12.5px; color: var(--danger); padding-left: 102px; overflow-wrap: anywhere; }
 .key-warn {
   margin-top: 14px; font-size: 13px; color: var(--danger); background: var(--soft);
@@ -751,9 +769,42 @@ textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
 .pm-links a { font-size: 13px; font-weight: 600; }
 @media (max-width: 560px) { .paper-modal { padding: 24px 18px; } .pm-title { font-size: 19px; } }
 
+/* ---------- recent-corpus peek (evidence behind the Within-IS subtitle) ---------- */
+.cp-overlay { z-index: 55; padding: 56px 16px 40px; }
+.corpus-peek {
+  position: relative; max-width: 680px; margin: 0 auto;
+  background: var(--card); border: 1px solid var(--border); border-top: 4px solid var(--wi-accent);
+  border-radius: 16px; box-shadow: var(--shadow-modal); padding: 26px 28px 22px;
+  animation: fadeUp 0.22s ease; max-height: 82vh; display: flex; flex-direction: column;
+}
+.cp-head { margin-bottom: 14px; padding-right: 34px; }
+.cp-kicker { font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--wi-accent); }
+.cp-h { font-family: var(--serif); font-size: 22px; font-weight: 700; margin-top: 2px; }
+.cp-sub { font-size: 13px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+.cp-count { font-size: 11.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+.cp-list { overflow-y: auto; min-height: 0; }
+.cp-row { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid var(--divider); }
+.cp-venue {
+  flex: none; width: 56px; text-align: center; align-self: flex-start; margin-top: 2px;
+  font-size: 11px; font-weight: 700; padding: 3px 4px; border-radius: 6px;
+  color: var(--wi-faint); background: var(--wi-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cp-venue.primary { color: #fff; background: var(--wi-accent); }
+.cp-main { min-width: 0; flex: 1; }
+.cp-title { font-size: 14.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.cp-title a { color: var(--text); }
+.cp-title a:hover { color: var(--wi-accent); text-decoration: underline; }
+.cp-meta { font-size: 12.5px; color: var(--meta); margin-top: 3px; }
+.cp-abs {
+  font-size: 12.5px; color: var(--muted); margin-top: 6px; line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.cp-loading, .cp-empty { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; padding: 24px 2px; }
+@media (max-width: 560px) { .corpus-peek { padding: 22px 18px 18px; } .cp-venue { width: 48px; } }
+
 /* ---------- account & sync ---------- */
-.nav-sync.on { color: var(--green-text); border-color: var(--green-soft); }
-.nav-sync.err { color: #b3402e; }
+/* signed-in "Sign out" button carries the soft green accent */
+.nav-auth.on { color: var(--green-text); border-color: var(--green-soft); }
 .acct-card {
   max-width: 480px; margin: 0 auto; background: var(--card); border: 1px solid var(--border);
   border-radius: 16px; padding: 26px 28px; box-shadow: var(--shadow-modal);

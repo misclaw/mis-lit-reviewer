@@ -60,7 +60,7 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel, i
     if (draft.step === 0) return [
       h("div", { class: "onb-h" }, mode === "edit" ? "Your workspace" : "Set up your workspace"),
       h("div", { class: "onb-sub" },
-        "Runs in your browser — no account required. An optional free account (⇅ in the top bar later) " +
+        "Runs in your browser — no account required. An optional free account (Sign in, top bar) " +
         "syncs your workspace across devices. Open-source: audit the code and run it locally if you prefer."),
       h("label", { class: "field" }, "Name",
         h("input", { value: draft.profile.name, placeholder: "Ada Scholar",
@@ -135,7 +135,7 @@ export function renderOnboard(container, { mode = "onboard", onDone, onCancel, i
     return h("div", { class: "key-row" },
       h("div", { class: "kname" }, meta.label),
       h("input", { type: "password", value: p.keys[prov], placeholder: meta.ph,
-        "aria-label": meta.label + " API key",
+        "aria-label": meta.label + " API key", dataset: { prov },
         oninput: (e) => {
           p.keys[prov] = e.target.value;
           if (draft.verifying[prov]) { delete draft.verifying[prov]; p.verified[prov] = false; }
