@@ -23,6 +23,7 @@ const DEFAULT_PREFS = () => ({
   outsideProvider: "",    // provider for the outside-IS search ("" = same as provider)
   models: { wi: {}, os: {} }, // per-zone, per-provider model choice {wi: {anthropic: "claude-…"}, os: {…}}
   outsidePrompt: "",      // custom outside-IS system prompt ("" = built-in default)
+  layout: "one",          // result columns: "one" (Google-Scholar-style, default) | "two"
 });
 
 const EMPTY = () => ({
@@ -259,6 +260,13 @@ export function deleteSession(id) {
   const d = load();
   d.sessions = d.sessions.filter((s) => s.id !== id);
   save();
+}
+// Mute the "looks related — import?" suggestion for a captured session without
+// deleting it (it still lives in the collapsed capture history, importable).
+export function dismissSuggestion(id) {
+  const d = load();
+  const row = d.sessions.find((s) => s.id === id);
+  if (row && !row.suggestDismissed) { row.suggestDismissed = true; save(); }
 }
 
 // ---- export / import (whole store as JSON) ----

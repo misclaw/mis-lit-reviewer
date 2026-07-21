@@ -8,7 +8,7 @@ import * as store from "./store.js";
 import { collectBackward, collectForward, screenCandidates } from "./citegraph.js";
 import { venueAbbr } from "./pipeline.js";
 import { resolveModel } from "./llm.js";
-import { paperCard } from "./review.js";
+import { paperCard, gridLayoutClass, normPoints } from "./review.js";
 import { openPaperModal } from "./paper-modal.js";
 import { exportRow } from "./export.js";
 
@@ -102,7 +102,7 @@ function gCard(p, { main = false, x, y, hClamp, sel = false, linkNote, onClick, 
     h("div", { class: "gm" },
       (typeof p.authors === "string" ? p.authors : (p.authors || []).slice(0, 4).join(", ")),
       " · ", h("strong", {}, venueAbbr(p.venue)), p.year ? ` · ${p.year}` : ""),
-    h("div", { class: "gr" }, p.rationale || p.summary || ""),
+    h("div", { class: "gr" }, normPoints(p)[0] || p.rationale || p.summary || ""),
     h("div", { class: "gf" },
       h("span", {}, linkNote),
       fmtCites(p.cited) != null && h("span", {}, `Cited by ${fmtCites(p.cited)}`),
@@ -180,7 +180,7 @@ function graphBody(ctx, dir, data) {
 function listBody(ctx, dir, data) {
   const nM = ctx.stream.within?.length || 0;
   const isBack = dir === "back";
-  return h("div", { class: "results-grid graph-list" },
+  return h("div", { class: gridLayoutClass() + " graph-list" },
     data.selected.map((p, i) => paperCard(p, {
       variant: isBack ? "wi" : "os", rank: i + 1, ctx,
       badge: (isBack ? "Cited by " : "Cites ") + (p.links?.length || 0) + `/${nM} main papers`,

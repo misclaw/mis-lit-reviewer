@@ -93,9 +93,10 @@ export async function rerank({ query, refined, candidates, profile, prefs, provi
     system:
       `From the ${candidates.length} candidate papers, select and rank the ${n} most relevant to the research question. ` +
       "Judge by conceptual fit — theory, constructs, phenomenon, method — not by citation count. " +
-      "Reply with JSON only: {\"picks\": [{\"i\": <candidate index>, \"summary\": <one-line summary of the paper itself>, " +
-      "\"rationale\": <one sentence on why it matters for THIS question>}]} " +
-      `— exactly ${n} picks (fewer only if fewer are genuinely relevant), most relevant first.`,
+      "Present each like a Google Scholar Labs answer: one plain sentence, then two short bullet points. " +
+      "Reply with JSON only: {\"picks\": [{\"i\": <candidate index>, \"summary\": <one sentence summarizing the paper>, " +
+      "\"points\": [<two short bullets on why it matters for THIS question — key contribution, finding, or link>]}]} " +
+      `— exactly ${n} picks (fewer only if fewer are genuinely relevant), most relevant first; exactly two points each.`,
     user: `${profileBlurb(profile, prefs)}\n\nResearch question: ${query}\nRefined phrasing: ${refined}\n\nCandidates:\n\n${listing}`,
   });
   const picks = Array.isArray(out.picks) ? out.picks : [];
@@ -108,12 +109,19 @@ export async function rerank({ query, refined, candidates, profile, prefs, provi
     results.push({
       ...candidates[i],
       summary: typeof p.summary === "string" ? p.summary : clip(candidates[i].abstract, 180),
-      rationale: typeof p.rationale === "string" ? p.rationale : "Selected by LLM relevance screening.",
+      points: cleanPoints(p.points),
+      rationale: typeof p.rationale === "string" ? p.rationale : null,
     });
     if (results.length >= n) break;
   }
   if (!results.length) throw new Error("reranker returned no usable picks");
   return results;
+}
+
+// Normalize an LLM "points" field to at most two clean bullet strings.
+export function cleanPoints(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean).slice(0, 2);
 }
 
 // ---- prestige ranking: user's primary venues first, then secondary, then rest;
@@ -140,10 +148,12 @@ export function prestigeSort(results, prefs) {
 export const OUTSIDE_PROMPT_DEFAULT =
   "Use your web search tool to find real, verifiable academic papers relevant to the research question, " +
   "drawing on the full breadth of the scholarly literature across every relevant discipline. Never invent a paper — " +
-  "every entry must come from something you actually found. Reply with JSON only:\n" +
+  "every entry must come from something you actually found. Present each like a Google Scholar Labs answer: " +
+  "one sentence, then two short bullet points. Reply with JSON only:\n" +
   "{\"papers\": [{\"title\": str, \"authors\": str, \"venue\": str, \"year\": int, \"discipline\": str, " +
-  "\"url\": str, \"doi\": str|null, \"summary\": <one-line summary>, \"rationale\": <why it matters for this question>}]}\n" +
-  "— up to {n} papers, most relevant first.";
+  "\"url\": str, \"doi\": str|null, \"summary\": <one sentence summary>, " +
+  "\"points\": [<two short bullets on why it matters for this question>]}]}\n" +
+  "— up to {n} papers, most relevant first; exactly two points each.";
 
 export async function searchOutside({ query, profile, prefs, provider, key, model, prompt }, n = 8) {
   const system = (prompt && prompt.trim() ? prompt : OUTSIDE_PROMPT_DEFAULT).replaceAll("{n}", String(n));
@@ -165,6 +175,7 @@ export async function searchOutside({ query, profile, prefs, provider, key, mode
       url: typeof p.url === "string" ? p.url : (p.doi ? "https://doi.org/" + p.doi : null),
       doi: typeof p.doi === "string" ? p.doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, "") : null,
       summary: typeof p.summary === "string" ? p.summary : "",
+      points: cleanPoints(p.points),
       rationale: typeof p.rationale === "string" ? p.rationale : "",
       cited: null,
       source: "llm",
@@ -293,10 +304,11 @@ export async function describeImports({ papers, query, profile, prefs, provider,
     model,
     maxTokens: 4000,
     system:
-      "A researcher imported these papers into a literature review. For each paper, write a one-line summary of " +
-      "the paper itself, one sentence on why it matters for the research question, and name its home discipline. " +
-      "Reply with JSON only: {\"items\": [{\"i\": <index>, \"summary\": str, \"rationale\": str, \"discipline\": str}]} " +
-      "— one item per paper, same indices.",
+      "A researcher imported these papers into a literature review. Present each like a Google Scholar Labs " +
+      "answer: a one-sentence summary of the paper, then two short bullet points on why it matters for the " +
+      "research question; also name its home discipline. " +
+      "Reply with JSON only: {\"items\": [{\"i\": <index>, \"summary\": str, \"points\": [str, str], \"discipline\": str}]} " +
+      "— one item per paper, same indices; exactly two points each.",
     user: `${profileBlurb(profile, prefs)}\n\nResearch question: ${query}\n\nImported papers:\n\n${listing}`,
   });
   const items = Array.isArray(out.items) ? out.items : [];
@@ -304,9 +316,11 @@ export async function describeImports({ papers, query, profile, prefs, provider,
   return papers.map((p, i) => {
     const x = byIdx.get(i);
     if (!x) return p;
+    const points = cleanPoints(x.points);
     return {
       ...p,
       summary: typeof x.summary === "string" && x.summary ? x.summary : p.summary,
+      points: points.length ? points : (p.points || []),
       rationale: typeof x.rationale === "string" && x.rationale ? x.rationale : p.rationale,
       discipline: typeof x.discipline === "string" && x.discipline ? x.discipline : p.discipline,
     };

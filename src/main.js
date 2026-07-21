@@ -184,9 +184,7 @@ function nav(stream) {
   const initial = (profile.name || "A")[0].toUpperCase();
   return h("div", { class: "nav" },
     h("div", { class: "nav-inner" },
-      h("div", { class: "wordmark" },
-        "Paper Trails ",
-        h("a", { class: "mc", href: "https://misclaw.app", title: "misclaw.app — all projects" }, "misclaw")),
+      h("div", { class: "wordmark" }, "Paper Trails"),
       h("div", { class: "stream-wrap" },
         h("button", { class: "stream-btn", onclick: () => { app.streamOpen = !app.streamOpen; render(); } },
           h("span", { class: "dot" }),
@@ -211,13 +209,16 @@ function nav(stream) {
               "AI requests (your question + researcher profile) go directly to the provider you chose, with your key. " +
               "Production pages load Google Analytics for anonymous page-view stats." },
             h("span", { class: "dot" }), "Research data stays in this browser"),
-      syncNavButton(() => { app.accountOpen = true; render(); }),
-      h("button", { class: "nav-btn nav-help", title: "How this works — take the quick tour",
-        onclick: () => startTour(ctx()) }, "?"),
-      h("button", { class: "nav-btn nav-prefs", title: "Preferences",
-        onclick: () => { app.prefsOpen = true; render(); } },
-        `${initial} · Preferences`),
-      themeButton()));
+      // Keep the action controls together so the theme toggle can't wrap to a
+      // second line on its own — the whole group moves as a unit if it must.
+      h("div", { class: "nav-actions" },
+        syncNavButton(() => { app.accountOpen = true; render(); }),
+        h("button", { class: "nav-btn nav-help", title: "How this works — take the quick tour",
+          onclick: () => startTour(ctx()) }, "?"),
+        h("button", { class: "nav-btn nav-prefs", title: "Preferences",
+          onclick: () => { app.prefsOpen = true; render(); } },
+          `${initial} · Preferences`),
+        themeButton())));
 }
 
 function arrows(stream) {
@@ -316,7 +317,8 @@ function welcomeScreen() {
           h("div", { class: "wc-sub" }, "Start right away — your work stays in this browser"),
           h("div", { class: "wc-go" }, "→"))),
       h("a", { class: "welcome-mac", href: MAC_APP_URL, target: "_blank", rel: "noopener" },
-        h("span", { class: "mac-glyph", "aria-hidden": "true" }, "⌘"),
+        h("img", { class: "mac-glyph", src: (import.meta.env.BASE_URL || "/") + "misclaw.png",
+          alt: "", width: 34, height: 34 }),
         h("span", {},
           h("strong", {}, "Prefer a native window? Get Paper Trails for Mac"),
           h("span", { class: "mac-sub" }, "A desktop app that stays signed in and syncs with your browser — build it from the repo ↗"))),

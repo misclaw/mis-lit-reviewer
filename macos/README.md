@@ -21,7 +21,7 @@ open "macos/build/Paper Trails.app"
 ```
 
 Requires the Xcode command-line tools (`swiftc`, `sips`, `iconutil`,
-`codesign`, `qlmanage`). The icon is rendered from `icon.svg` at build time.
+`codesign`). The app icon is the misclaw logo (`icon.png`) at build time.
 
 Development against a local dev server:
 

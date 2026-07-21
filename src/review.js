@@ -388,7 +388,8 @@ async function describeMissing(ctx, streamId) {
     : prefs.keys[prefs.provider]?.trim() ? prefs.keys[prefs.provider] : null;
   const cur = store.getStream(streamId);
   if (!key || !cur?.query) return;
-  const missing = (cur.outside || []).filter((p) => p.title && (!p.summary || !p.rationale));
+  const missing = (cur.outside || []).filter((p) =>
+    p.title && (!p.summary || (!p.points?.length && !p.rationale)));
   if (!missing.length) return;
   describeBusy = true;
   try {
@@ -439,6 +440,31 @@ function stageCard(stages, current, { os = false, error = null } = {}) {
     error && h("div", { class: "stage-err" }, error));
 }
 
+// Google Scholar Labs presentation: two short bullet points on relevance.
+// Falls back to the older single "Why relevant" sentence for papers reviewed
+// before points existed.
+export function normPoints(p) {
+  const pts = Array.isArray(p.points) ? p.points.filter((x) => typeof x === "string" && x.trim()).slice(0, 2) : [];
+  return pts;
+}
+function pointsBlock(p) {
+  const pts = normPoints(p);
+  if (pts.length) return h("ul", { class: "p-points" }, pts.map((pt) => h("li", {}, pt)));
+  if (p.rationale) return h("div", { class: "p-rationale" }, h("strong", {}, "Why relevant: "), p.rationale);
+  return null;
+}
+
+// Result columns: default one column (Google-Scholar-style), opt-in two.
+export const gridLayoutClass = () => (store.getPrefs().layout === "two" ? "results-grid cols-2" : "results-grid");
+export function layoutToggle(ctx) {
+  const cur = store.getPrefs().layout === "two" ? "two" : "one";
+  const set = (v) => { savePrefs({ layout: v }); ctx.rerender(); };
+  return h("div", { class: "layout-toggle", role: "group", "aria-label": "Result columns" },
+    [["one", "☰", "One column"], ["two", "▦", "Two columns"]].map(([v, glyph, label]) =>
+      h("button", { class: `chip${cur === v ? " on" : ""}`, "aria-pressed": String(cur === v),
+        title: label, onclick: () => set(v) }, glyph)));
+}
+
 export function paperCard(p, { variant, rank = null, badge = null, cross = null, ctx = null }) {
   const authors = typeof p.authors === "string" ? p.authors : (p.authors || []).join(", ");
   const cites = fmtCites(p.cited);
@@ -479,7 +505,7 @@ export function paperCard(p, { variant, rank = null, badge = null, cross = null,
           p.year ? ` · ${p.year}` : "",
           pub ? ` · ${pub}` : ""),
         p.summary && h("div", { class: "p-summary" }, p.summary),
-        p.rationale && h("div", { class: "p-rationale" }, h("strong", {}, "Why relevant: "), p.rationale),
+        pointsBlock(p),
         h("div", { class: "p-foot" },
           cites != null && h("span", {}, `Cited by ${cites}`),
           badge && h("span", {}, badge),
@@ -508,7 +534,7 @@ function withinZone(ctx) {
         ` · ${fmtCites(app.status?.totals?.searchable) || "the"} abstracts → 100 by similarity → `,
         h("strong", {}, `${stream.within.length} reranked`),
         run.refineNote ? h("span", { style: { color: "var(--danger)" } }, ` · ${run.refineNote}`) : ""),
-      h("div", { class: "results-grid" },
+      h("div", { class: gridLayoutClass() },
         list.map((p, i) => paperCard(p, {
           variant: "wi", rank: i + 1, ctx,
           badge: prestige ? "Prestige rank" : "Relevance rank",
@@ -539,6 +565,7 @@ function withinZone(ctx) {
         h("div", { class: "zone-title" }, "Within IS"),
         h("div", { class: "zone-sub" }, "Curated IS corpus — basket journals + major IS conferences, crawled daily"),
         h("div", { class: "spacer" }),
+        done && layoutToggle(ctx),
         done && exportRow(prestige ? prestigeSort(stream.within, prefs) : stream.within, "within-is-review"),
         done && h("button", {
           class: `prestige-btn${prestige ? " on" : ""}`,
@@ -642,8 +669,8 @@ function outsideZone(ctx) {
     if (st.merged) bits.push(`${st.merged} duplicate${st.merged === 1 ? "" : "s"} merged`);
     if (st.overlap) bits.push(`${st.overlap} already in the IS set`);
     return [
-      h("div", { class: "outside-line" }, bits.join(" · "), exportRow(list, "outside-is-collection")),
-      h("div", { class: "results-grid" },
+      h("div", { class: "outside-line" }, bits.join(" · "), layoutToggle(ctx), exportRow(list, "outside-is-collection")),
+      h("div", { class: gridLayoutClass() },
         ranked.map((p) => {
           const chs = channelsOf(p);
           return paperCard(p, { variant: "os", ctx, badge: badgeFor(p), cross: chs.length > 1 ? chs : null });
@@ -710,11 +737,36 @@ const TOOLS = [
   { name: "SciSpace", url: (q) => "https://scispace.com/search" + (q ? "?q=" + encodeURIComponent(q) : "") },
 ];
 
+// Lightweight query-similarity for the "looks related — import?" nudge. Content
+// tokens only (drop stopwords), overlap coefficient = |A∩B| / min(|A|,|B|) — so
+// a captured search that's the same question with a few extra words still scores
+// high. Deliberately cheap and best-effort: missing a match is fine.
+const STOPWORDS = new Set(("a an the of to in on for and or but with without within into over under how does do "
+  + "is are was were be been being this that these those it its as at by from about their our your my we you they "
+  + "which what when where who whom whose why can could would should may might will shall not no yes than then " +
+  "between across via using use used based user users effect effects role impact").split(/\s+/));
+function contentTokens(s) {
+  return [...new Set((s || "").toLowerCase().match(/[a-z0-9]+/g)?.filter((t) => t.length > 2 && !STOPWORDS.has(t)) || [])];
+}
+export function querySim(a, b) {
+  const A = contentTokens(a), B = new Set(contentTokens(b));
+  if (!A.length || !B.size) return 0;
+  const inter = A.filter((t) => B.has(t)).length;
+  return inter / Math.min(A.length, B.size); // overlap coefficient
+}
+const SIM_THRESHOLD = 0.8;
+
 function extPanel(ctx) {
   const sessions = store.listSessions();
   const detected = extVersion();
   const q = ctx.stream.query || "";
   const paste = h("textarea", { placeholder: '{"v":1,"tool":"…","query":"…","papers":[{"title":"…"}]}' });
+  // Un-imported captures that closely match the current question — surface these
+  // as an active suggestion instead of leaving them buried in the history list.
+  const suggestions = q.trim()
+    ? sessions.filter((x) => !x.imported[ctx.stream.id] && !x.suggestDismissed
+        && querySim(q, x.query) >= SIM_THRESHOLD)
+    : [];
 
   // Firefox loads the same folder as a temporary add-on; Chromium loads it
   // unpacked. Show the steps for the browser we're actually running in.
@@ -767,20 +819,36 @@ function extPanel(ctx) {
         "Run your question on the tools below; the extension sends their results back here — nothing goes through any server.")),
     setup,
     launcher,
-    sessions.length > 0 && h("div", { class: "ext-rows" },
-      sessions.map((x) =>
-        h("div", { class: "ext-row" },
-          h("div", { class: "badge" }, (x.tool || "?")[0].toUpperCase()),
-          h("div", { class: "mid" },
-            h("div", { class: "tool" }, x.tool, " ", h("span", { class: "when" }, "· " + timeAgo(x.received_at))),
-            h("div", { class: "q" },
-              x.query ? `“${x.query}” — ` : "", `${x.papers.length} papers`,
-              x.hasRationales ? ", with rationales" : "")),
-          x.imported[ctx.stream.id]
-            ? h("button", { class: "btn-import done" }, "Imported ✓")
-            : h("button", { class: "btn-import", onclick: () => importSession(ctx, x) }, "Import"),
-          h("button", { class: "stream-del", title: "Dismiss session",
-            onclick: () => { store.deleteSession(x.id); ctx.rerender(); } }, "✕")))),
+    // Active suggestions: captured searches that match the current question.
+    suggestions.length > 0 && h("div", { class: "ext-suggests" },
+      suggestions.map((x) =>
+        h("div", { class: "ext-suggest" },
+          h("div", { class: "sg-body" },
+            h("div", { class: "sg-head" }, "Looks related to your question"),
+            h("div", { class: "sg-q" },
+              h("strong", {}, x.tool), " · ",
+              x.query ? `“${x.query}” — ` : "", `${x.papers.length} paper${x.papers.length === 1 ? "" : "s"}`)),
+          h("div", { class: "sg-actions" },
+            h("button", { class: "btn-import", onclick: () => importSession(ctx, x) }, "Import"),
+            h("button", { class: "btn btn-sm", title: "Don't suggest this capture again",
+              onclick: () => { store.dismissSuggestion(x.id); ctx.rerender(); } }, "Not now"))))),
+    // Full capture history is collapsed by default — it accumulates over time.
+    sessions.length > 0 && h("details", { class: "ext-history" },
+      h("summary", {}, `Capture history (${sessions.length})`),
+      h("div", { class: "ext-rows" },
+        sessions.map((x) =>
+          h("div", { class: "ext-row" },
+            h("div", { class: "badge" }, (x.tool || "?")[0].toUpperCase()),
+            h("div", { class: "mid" },
+              h("div", { class: "tool" }, x.tool, " ", h("span", { class: "when" }, "· " + timeAgo(x.received_at))),
+              h("div", { class: "q" },
+                x.query ? `“${x.query}” — ` : "", `${x.papers.length} papers`,
+                x.hasRationales ? ", with rationales" : "")),
+            x.imported[ctx.stream.id]
+              ? h("button", { class: "btn-import done" }, "Imported ✓")
+              : h("button", { class: "btn-import", onclick: () => importSession(ctx, x) }, "Import"),
+            h("button", { class: "stream-del", title: "Delete capture",
+              onclick: () => { store.deleteSession(x.id); ctx.rerender(); } }, "✕"))))),
     h("details", { class: "ext-paste" },
       h("summary", {}, "Paste a session as JSON instead"),
       paste,

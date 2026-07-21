@@ -131,7 +131,15 @@ export function openPaperModal(paper, { accent = "wi", persist = null } = {}) {
       metaRow("DOI", paper.doi ? link("https://doi.org/" + paper.doi, paper.doi) : null),
       metaRow("Provenance", provParts.length ? provParts.join("  ·  ") : null)),
     paper.summary && h("div", { class: "pm-summary" }, h("span", { class: "pm-lab" }, "Summary"), paper.summary),
-    paper.rationale && h("div", { class: "pm-rationale" }, h("span", { class: "pm-lab" }, "Why relevant"), paper.rationale),
+    (() => {
+      const pts = Array.isArray(paper.points) ? paper.points.filter((x) => typeof x === "string" && x.trim()).slice(0, 2) : [];
+      if (pts.length) return h("div", { class: "pm-rationale" },
+        h("span", { class: "pm-lab" }, "Why relevant"),
+        h("ul", { class: "pm-points" }, pts.map((pt) => h("li", {}, pt))));
+      if (paper.rationale) return h("div", { class: "pm-rationale" },
+        h("span", { class: "pm-lab" }, "Why relevant"), paper.rationale);
+      return null;
+    })(),
     h("div", { class: "pm-abstract" },
       h("div", { class: "pm-lab" }, "Abstract"),
       abstractBox),
