@@ -1,10 +1,10 @@
 {
- "updated_at": "2026-07-29T00:00:58+00:00",
+ "updated_at": "2026-07-30T02:22:31+00:00",
  "last_run": {
-  "date": "2026-07-29",
-  "since": "2026-07-29T00:00:05+00:00",
-  "new_papers": 4,
-  "digest_sent": true
+  "date": "2026-07-30",
+  "since": "2026-07-30T00:06:57+00:00",
+  "new_papers": 0,
+  "digest_sent": false
  },
  "totals": {
   "corpus": 435750,
